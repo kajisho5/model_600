@@ -99,8 +99,10 @@ CalibrationDialog::CalibrationDialog(dsp::Engine* engine, UiLang lang, QWidget* 
 
     const QJsonObject st = cal_.value(QStringLiteral("steps")).toObject();
     const QJsonArray xs = st.value(QStringLiteral("xs")).toArray();
-    for (int i = 0; i < 3 && i < xs.size(); ++i)
-        steps_[static_cast<std::size_t>(i)] = new hw::Led(QPointF(xs.at(i).toDouble(), st.value(QStringLiteral("y")).toDouble()), this);
+    for (int i = 0; i < 3; ++i) {   // Always three LEDs, even if the layout is missing.
+        const double x = i < xs.size() ? xs.at(i).toDouble() : 458.0 + 64.0 * i;
+        steps_[static_cast<std::size_t>(i)] = new hw::Led(QPointF(x, st.value(QStringLiteral("y")).toDouble(40.0)), this);
+    }
 
     lamp_ = new hw::Lamp(cal_point(cal_.value(QStringLiteral("lamp")).toObject()), QStringLiteral("amber"), this);
 
