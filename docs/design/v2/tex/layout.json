@@ -58,7 +58,7 @@
       },
       "links": {
         "x": 806,
-        "y": 168,
+        "y": 186,
         "dx": 38,
         "lit": [
           true,
@@ -84,9 +84,9 @@
       "knobs_big": [
         {
           "id": "input",
-          "cx": 168,
-          "cy": 318,
-          "r": 60,
+          "cx": 166,
+          "cy": 312,
+          "r": 54,
           "label": "INPUT GAIN",
           "unit": "dB",
           "min": -18,
@@ -108,8 +108,8 @@
         {
           "id": "output",
           "cx": 940,
-          "cy": 318,
-          "r": 60,
+          "cy": 312,
+          "r": 54,
           "label": "OUTPUT TRIM",
           "unit": "dB",
           "min": -24,
@@ -133,8 +133,8 @@
       "knobs_step": [
         {
           "id": "character",
-          "cx": 330,
-          "cy": 352,
+          "cx": 346,
+          "cy": 372,
           "r": 28,
           "label": "CHARACTER",
           "positions": [
@@ -147,8 +147,8 @@
         },
         {
           "id": "space",
-          "cx": 758,
-          "cy": 352,
+          "cx": 784,
+          "cy": 372,
           "r": 28,
           "label": "SPACE FX",
           "positions": [
@@ -168,7 +168,7 @@
         {
           "id": "meter",
           "cx": 550,
-          "cy": 300,
+          "cy": 318,
           "label_l": "OUT",
           "label_r": "GR",
           "title": "METER",
@@ -198,7 +198,7 @@
         {
           "id": "cal",
           "cx": 433,
-          "cy": 388,
+          "cy": 396,
           "w": 54,
           "h": 34,
           "label": "CAL 10s",
@@ -208,7 +208,7 @@
         {
           "id": "ab",
           "cx": 511,
-          "cy": 388,
+          "cy": 396,
           "w": 54,
           "h": 34,
           "label": "A/B",
@@ -218,7 +218,7 @@
         {
           "id": "bleep",
           "cx": 589,
-          "cy": 388,
+          "cy": 396,
           "w": 54,
           "h": 34,
           "label": "BLEEP",
@@ -228,7 +228,7 @@
         {
           "id": "cough",
           "cx": 667,
-          "cy": 388,
+          "cy": 396,
           "w": 54,
           "h": 34,
           "label": "COUGH",
@@ -295,8 +295,8 @@
         "label": "POWER"
       },
       "links": {
-        "x": 900,
-        "y": 178,
+        "x": 908,
+        "y": 186,
         "dx": 30,
         "lit": [
           true,
@@ -309,7 +309,7 @@
       "vus": [
         {
           "cx": 500,
-          "cy": 168,
+          "cy": 160,
           "w": 220,
           "h": 152,
           "face_w": 184,
@@ -320,7 +320,7 @@
         },
         {
           "cx": 736,
-          "cy": 168,
+          "cy": 160,
           "w": 220,
           "h": 152,
           "face_w": 184,
@@ -333,9 +333,9 @@
       "knobs_big": [
         {
           "id": "target",
-          "cx": 168,
-          "cy": 318,
-          "r": 60,
+          "cx": 166,
+          "cy": 312,
+          "r": 54,
           "label": "TARGET LOUDNESS",
           "unit": "LUFS",
           "min": -24,
@@ -353,9 +353,9 @@
         },
         {
           "id": "duck",
-          "cx": 380,
-          "cy": 318,
-          "r": 46,
+          "cx": 372,
+          "cy": 324,
+          "r": 42,
           "label": "DUCK WHEN I TALK",
           "unit": "dB",
           "min": -12,
@@ -369,13 +369,13 @@
           ],
           "tick": 1.5,
           "value": -3.5,
-          "label_y": 430
+          "label_y": 426
         },
         {
           "id": "output",
           "cx": 940,
-          "cy": 318,
-          "r": 60,
+          "cy": 312,
+          "r": 54,
           "label": "OUTPUT TRIM",
           "unit": "dB",
           "min": -24,
@@ -495,7 +495,7 @@
       },
       "links": {
         "x": 806,
-        "y": 168,
+        "y": 186,
         "dx": 38,
         "lit": [
           true,
@@ -521,9 +521,9 @@
       "knobs_big": [
         {
           "id": "ceiling",
-          "cx": 168,
-          "cy": 318,
-          "r": 60,
+          "cx": 166,
+          "cy": 312,
+          "r": 54,
           "label": "IMPACT CEILING",
           "unit": "dB",
           "min": -12,
@@ -541,9 +541,9 @@
         },
         {
           "id": "scoop",
-          "cx": 380,
-          "cy": 318,
-          "r": 46,
+          "cx": 366,
+          "cy": 324,
+          "r": 42,
           "label": "VOICE SCOOP",
           "unit": "dB",
           "min": -12,
@@ -557,13 +557,13 @@
           ],
           "tick": 1.5,
           "value": -5.0,
-          "label_y": 430
+          "label_y": 426
         },
         {
           "id": "output",
           "cx": 940,
-          "cy": 318,
-          "r": 60,
+          "cy": 312,
+          "r": 54,
           "label": "OUTPUT TRIM",
           "unit": "dB",
           "min": -24,
@@ -591,14 +591,14 @@
       "lamps": [
         {
           "cx": 540,
-          "cy": 392,
+          "cy": 404,
           "color": "red",
           "lit": true,
           "label": "LIMIT"
         },
         {
           "cx": 660,
-          "cy": 392,
+          "cy": 404,
           "color": "green",
           "lit": true,
           "label": "SCOOPING"
@@ -607,7 +607,7 @@
       "ladders": [
         {
           "cx": 600,
-          "cy": 318,
+          "cy": 340,
           "n": 16,
           "lit": 6,
           "label": "LIMITING  dB",
@@ -703,7 +703,7 @@
       },
       "links": {
         "x": 806,
-        "y": 168,
+        "y": 186,
         "dx": 38,
         "lit": [
           true,
@@ -729,9 +729,9 @@
       "knobs_big": [
         {
           "id": "pocket",
-          "cx": 168,
-          "cy": 318,
-          "r": 60,
+          "cx": 166,
+          "cy": 312,
+          "r": 54,
           "label": "POCKET DEPTH",
           "unit": "dB",
           "min": -12,
@@ -750,8 +750,8 @@
         {
           "id": "output",
           "cx": 940,
-          "cy": 318,
-          "r": 60,
+          "cy": 312,
+          "r": 54,
           "label": "OUTPUT TRIM",
           "unit": "dB",
           "min": -24,
@@ -798,21 +798,21 @@
       "lamps": [
         {
           "cx": 520,
-          "cy": 392,
+          "cy": 404,
           "color": "amber",
           "lit": true,
           "label": "VOICE DUCK"
         },
         {
           "cx": 600,
-          "cy": 392,
+          "cy": 404,
           "color": "green",
           "lit": false,
           "label": "AFK SWELL"
         },
         {
           "cx": 680,
-          "cy": 392,
+          "cy": 404,
           "color": "amber",
           "lit": false,
           "label": "COUGH LIFT"
@@ -821,7 +821,7 @@
       "ladders": [
         {
           "cx": 600,
-          "cy": 318,
+          "cy": 340,
           "n": 16,
           "lit": 11,
           "label": "POCKET  dB",
@@ -871,7 +871,7 @@
       "pro": true,
       "panel": {
         "w": 1100,
-        "h": 630,
+        "h": 660,
         "ear": 40
       },
       "screws": [
@@ -881,7 +881,7 @@
         ],
         [
           20,
-          566
+          596
         ],
         [
           1080,
@@ -889,7 +889,7 @@
         ],
         [
           1080,
-          566
+          596
         ]
       ],
       "slots": [
@@ -899,7 +899,7 @@
         ],
         [
           20,
-          566
+          596
         ],
         [
           1080,
@@ -907,7 +907,7 @@
         ],
         [
           1080,
-          566
+          596
         ]
       ],
       "jewel": {
@@ -916,8 +916,8 @@
         "label": "POWER"
       },
       "links": {
-        "x": 900,
-        "y": 172,
+        "x": 908,
+        "y": 176,
         "dx": 30,
         "lit": [
           true,
@@ -930,7 +930,7 @@
       "vus": [
         {
           "cx": 178,
-          "cy": 292,
+          "cy": 290,
           "w": 216,
           "h": 148,
           "face_w": 180,
@@ -945,7 +945,7 @@
         },
         {
           "cx": 426,
-          "cy": 292,
+          "cy": 290,
           "w": 216,
           "h": 148,
           "face_w": 180,
@@ -960,7 +960,7 @@
         },
         {
           "cx": 674,
-          "cy": 292,
+          "cy": 290,
           "w": 216,
           "h": 148,
           "face_w": 180,
@@ -975,7 +975,7 @@
         },
         {
           "cx": 922,
-          "cy": 292,
+          "cy": 290,
           "w": 216,
           "h": 148,
           "face_w": 180,
@@ -989,8 +989,8 @@
           }
         },
         {
-          "cx": 410,
-          "cy": 512,
+          "cx": 420,
+          "cy": 540,
           "w": 168,
           "h": 104,
           "face_w": 132,
@@ -1004,8 +1004,8 @@
       "knobs_step": [
         {
           "id": "scene",
-          "cx": 600,
-          "cy": 512,
+          "cx": 604,
+          "cy": 548,
           "r": 26,
           "label": "SCENE",
           "positions": [
@@ -1020,8 +1020,8 @@
       ],
       "knobs_trim": [
         {
-          "cx": 248,
-          "cy": 404,
+          "cx": 250,
+          "cy": 418,
           "r": 17,
           "label": "TRIM",
           "value": 0.0,
@@ -1029,8 +1029,8 @@
           "max": 12
         },
         {
-          "cx": 496,
-          "cy": 404,
+          "cx": 498,
+          "cy": 418,
           "r": 17,
           "label": "TRIM",
           "value": 0.0,
@@ -1038,8 +1038,8 @@
           "max": 12
         },
         {
-          "cx": 744,
-          "cy": 404,
+          "cx": 746,
+          "cy": 418,
           "r": 17,
           "label": "TRIM",
           "value": 0.0,
@@ -1047,8 +1047,8 @@
           "max": 12
         },
         {
-          "cx": 992,
-          "cy": 404,
+          "cx": 994,
+          "cy": 418,
           "r": 17,
           "label": "TRIM",
           "value": 0.0,
@@ -1060,8 +1060,8 @@
       "buttons": [
         {
           "id": "mono",
-          "cx": 728,
-          "cy": 506,
+          "cx": 732,
+          "cy": 538,
           "w": 52,
           "h": 32,
           "label": "MONO",
@@ -1070,8 +1070,8 @@
         },
         {
           "id": "reset",
-          "cx": 798,
-          "cy": 506,
+          "cx": 804,
+          "cy": 538,
           "w": 52,
           "h": 32,
           "label": "RESET",
@@ -1080,8 +1080,8 @@
         },
         {
           "id": "chapter",
-          "cx": 868,
-          "cy": 506,
+          "cx": 876,
+          "cy": 538,
           "w": 52,
           "h": 32,
           "label": "CHAPTER",
@@ -1090,8 +1090,8 @@
         },
         {
           "id": "report",
-          "cx": 938,
-          "cy": 506,
+          "cx": 948,
+          "cy": 538,
           "w": 52,
           "h": 32,
           "label": "REPORT",
@@ -1102,21 +1102,21 @@
       "lamps": [
         {
           "cx": 120,
-          "cy": 508,
+          "cy": 544,
           "color": "amber",
           "lit": false,
           "label": "LOW"
         },
         {
-          "cx": 186,
-          "cy": 508,
+          "cx": 190,
+          "cy": 544,
           "color": "green",
           "lit": true,
           "label": "IN RANGE"
         },
         {
-          "cx": 252,
-          "cy": 508,
+          "cx": 260,
+          "cy": 544,
           "color": "red",
           "lit": false,
           "label": "HIGH"
@@ -1126,7 +1126,7 @@
       "displays": [
         {
           "id": "m",
-          "cx": 494,
+          "cx": 496,
           "cy": 96,
           "w": 112,
           "h": 56,
@@ -1135,7 +1135,7 @@
         },
         {
           "id": "s",
-          "cx": 628,
+          "cx": 640,
           "cy": 96,
           "w": 112,
           "h": 56,
@@ -1144,7 +1144,7 @@
         },
         {
           "id": "i",
-          "cx": 782,
+          "cx": 806,
           "cy": 96,
           "w": 152,
           "h": 56,
@@ -1156,7 +1156,7 @@
       "target": {
         "title": "YOUTUBE TARGET  -12 \u00b11.5 LUFS",
         "x": 96,
-        "y": 470
+        "y": 506
       }
     }
   }
