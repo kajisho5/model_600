@@ -38,6 +38,8 @@ extern "C" void m600_set_license(void* lic);
 extern "C" void m600_hotkey_bleep();
 extern "C" void m600_hotkey_cough(bool pressed);
 extern "C" void m600_hotkey_echo_toggle();
+QString m600_collect_karte_body();             // audio-filter.cpp
+void m600_notify_update(const QString& version); // audio-filter.cpp
 
 using namespace sw::model600;
 
@@ -63,18 +65,7 @@ QString timecode(std::int64_t elapsed_ms) {
     return QString::asprintf("%02lld:%02lld:%02lld", static_cast<long long>(s / 3600), static_cast<long long>((s % 3600) / 60), static_cast<long long>(s % 60));
 }
 
-QString chapter_file_path() {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    if (dir.isEmpty() || !QDir(dir).exists()) {
-        // Fall back to the module config folder when the desktop is blocked.
-        char* cfg = obs_module_config_path("");
-        dir = QString::fromUtf8(cfg ? cfg : "");
-        bfree(cfg);
-        QDir().mkpath(dir);
-    }
-    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd"));
-    return QDir(dir).filePath(QStringLiteral("MODEL600_chapters_%1.txt").arg(stamp));
-}
+QString chapter_file_path();
 
 void ensure_chapter_header(const QString& path) {
     if (QFile::exists(path)) return;
@@ -136,6 +127,66 @@ bool is_pro_edition() {
 
 } // namespace
 
+// -----------------------------------------------------------------------------
+//  Output folder shared by chapters and the audio karte: the desktop, or the
+//  module config folder when the desktop is unavailable or not writable.
+// -----------------------------------------------------------------------------
+QString m600_output_dir() {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    bool usable = !dir.isEmpty() && QDir(dir).exists();
+    if (usable) {
+        // Probe writability (some setups redirect or lock the desktop).
+        QFile probe(QDir(dir).filePath(QStringLiteral(".m600_write_probe")));
+        usable = probe.open(QIODevice::WriteOnly);
+        if (usable) { probe.close(); probe.remove(); }
+    }
+    if (!usable) {
+        char* cfg = obs_module_config_path("");
+        dir = QString::fromUtf8(cfg ? cfg : "");
+        bfree(cfg);
+        QDir().mkpath(dir);
+    }
+    return dir;
+}
+
+namespace {
+QString chapter_file_path() {
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd"));
+    return QDir(m600_output_dir()).filePath(QStringLiteral("MODEL600_chapters_%1.txt").arg(stamp));
+}
+} // namespace
+
+// Public chapter writer (console button, hotkey and voice command all use it).
+QString m600_write_chapter(const QString& label) {
+    write_chapter_mark(label);
+    return chapter_file_path();
+}
+
+// Post-stream "audio karte": session stats for SNS sharing. Returns the path,
+// or an empty string when the file could not be written.
+QString m600_export_karte() {
+    const QDateTime now = QDateTime::currentDateTime();
+    const QString path = QDir(m600_output_dir()).filePath(
+        QStringLiteral("MODEL600_karte_%1.txt").arg(now.toString(QStringLiteral("yyyyMMdd_HHmmss"))));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        blog(LOG_WARNING, "[MODEL 600] could not write karte: %s", path.toUtf8().constData());
+        return QString();
+    }
+    const QString stream_len = (g_stream_start_ms > 0) ? timecode(now_ms() - g_stream_start_ms)
+                                                       : QStringLiteral("--:--:--");
+    QString text;
+    text += QStringLiteral("=== MODEL 600 // オーディオカルテ (Audio Karte) ===\n");
+    text += QStringLiteral("日時 / Date        : %1\n").arg(now.toString(QStringLiteral("yyyy-MM-dd HH:mm")));
+    text += QStringLiteral("配信時間 / Stream   : %1\n\n").arg(stream_len);
+    text += m600_collect_karte_body();
+    text += QStringLiteral("\n#MODEL600 #SEVENTHWELL\n");
+    f.write(text.toUtf8());
+    f.close();
+    blog(LOG_INFO, "[MODEL 600] karte written: %s", path.toUtf8().constData());
+    return path;
+}
+
 MODULE_EXPORT const char* obs_module_name(void) { return "MODEL 600 // BROADCAST SUITE"; }
 MODULE_EXPORT const char* obs_module_description(void) {
     return "SEVENTHWELL MODEL 600 - broadcast-grade auto mixing suite (5 cooperating units).";
@@ -169,6 +220,8 @@ bool obs_module_load(void) {
 
     // Update checker (amber header ramp is lit by the console via this signal).
     g_updater = new update::UpdateChecker(QStringLiteral("1.0.0"));
+    QObject::connect(g_updater, &update::UpdateChecker::updateFound,
+                     [](QString version, QString, QString) { m600_notify_update(version); });
     g_updater->start();
 
     // Frontend heartbeat: persist bus-driven trims to scene data at 4 Hz.

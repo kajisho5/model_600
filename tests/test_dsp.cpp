@@ -71,6 +71,27 @@ int main() {
         }
     }
 
+    // Cough mute on UNIT 01 -> UNIT 04 sees it on the bus and lifts BGM +2 dB.
+    voice.cough().press(true);
+    for (int blk = 0; blk < 20; ++blk) {
+        for (int i = 0; i < N; ++i) { L[i] = 0.1f * std::sin(static_cast<float>(i) * 0.3f); R[i] = L[i]; }
+        voice.process_block(ch, 2, N);
+        for (int i = 0; i < N; ++i) { L[i] = std::sin(static_cast<float>(i) * 0.05f) * 0.3f; R[i] = L[i]; }
+        bgm.process_block(ch, 2, N);
+    }
+    if (bgm.telemetry().bgm_cough_lift.load() != 1) { std::printf("FAIL: BGM did not see the cough mute\n"); ++fails; }
+    voice.cough().release();
+
+    // Mono Check on UNIT 05: an anti-phase pair must fold to (near) silence.
+    Engine dir(MODE_DIRECTOR);
+    dir.prepare(48000.f, 2);
+    dir.params().mono_check.store(1);
+    for (int i = 0; i < N; ++i) { L[i] = 0.5f * std::sin(static_cast<float>(i) * 0.1f); R[i] = -L[i]; }
+    dir.process_block(ch, 2, N);
+    float acc = 0.f;
+    for (int i = 0; i < N; ++i) acc += L[i] * L[i] + R[i] * R[i];
+    if (acc > 1.0e-6f) { std::printf("FAIL: mono check did not fold anti-phase L/R (energy %g)\n", static_cast<double>(acc)); ++fails; }
+
     std::printf("[dsp] gain=%.2f ref=%.2f screams=%u ducked=%.2f -> %s\n",
                 g, voice.calibrator().result_reference_db(), tv.scream_defense_count.load(),
                 bgm.telemetry().duck_db.load(), fails == 0 ? "PASS" : "FAIL");

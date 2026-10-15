@@ -118,8 +118,9 @@ struct alignas(128) InstanceSlot {
     std::atomic<std::int32_t> signal_present;// 1 when above the noise floor.
     std::atomic<std::int32_t> is_loud_now;   // 1 when this unit is peaking hard.
 
+    std::atomic<std::int32_t> cough_active;  // 1 while UNIT 01 cough-mute is engaged.
+
     // Pad to a clean 128-byte footprint so sizeof() stays deterministic.
-    std::atomic<std::int32_t> slot_reserved0;
     std::atomic<std::int32_t> slot_reserved1;
     std::atomic<std::int32_t> slot_reserved2;
     std::atomic<std::int32_t> slot_reserved3;
@@ -143,7 +144,7 @@ struct alignas(128) InstanceSlot {
         is_mic_muted.store(0, std::memory_order_relaxed);
         signal_present.store(0, std::memory_order_relaxed);
         is_loud_now.store(0, std::memory_order_relaxed);
-        slot_reserved0.store(0, std::memory_order_relaxed);
+        cough_active.store(0, std::memory_order_relaxed);
         slot_reserved1.store(0, std::memory_order_relaxed);
         slot_reserved2.store(0, std::memory_order_relaxed);
         slot_reserved3.store(0, std::memory_order_relaxed);
@@ -314,6 +315,25 @@ public:
     void set_mic_muted(bool muted) noexcept {
         if (!valid()) return;
         view_->unit_slots[my_slot_index_].is_mic_muted.store(muted ? 1 : 0, std::memory_order_release);
+    }
+
+    // UNIT 01 publishes its cough-mute state; UNIT 04 lifts BGM +2 dB meanwhile.
+    void set_cough_active(bool active) noexcept {
+        if (!valid()) return;
+        view_->unit_slots[my_slot_index_].cough_active.store(active ? 1 : 0, std::memory_order_release);
+    }
+
+    bool any_cough_active() const noexcept {
+        if (!view_) return false;
+        const std::int64_t t = now_us();
+        for (std::size_t i = 0; i < kMaxSlots; ++i) {
+            const auto& s = view_->unit_slots[i];
+            if (s.in_use.load(std::memory_order_acquire) == 0) continue;
+            if (s.mode.load(std::memory_order_acquire) != MODE_VOICE) continue;
+            if (t - s.heartbeat_us.load(std::memory_order_acquire) > kHeartbeatGcUs) continue;
+            if (s.cough_active.load(std::memory_order_acquire) != 0) return true;
+        }
+        return false;
     }
 
     void set_signal_present(bool present) noexcept {

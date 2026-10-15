@@ -1,0 +1,38 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.edition }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [pro, standard]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake g++ qt6-base-dev qt6-multimedia-dev libobs-dev
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DMODEL600_BUILD_TESTS=ON
+          -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Python tools sanity
+        run: python3 setup_project.py --verify

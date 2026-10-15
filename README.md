@@ -57,3 +57,8 @@ by the Cloudflare Worker in `tools/cloudflare_worker_auth.js`; the vendor mints
 keys with `tools/generate_keys.py`. The offline signed token is byte-for-byte
 identical between the Worker and `license-manager.hpp`, so activation survives a
 network outage.
+
+## 既知の制限 / Known limitations
+
+- 音声コマンド受理時の完了チャイム（モニター専用、-24 dB）は未実装です。OBSフィルタの出力は配信にも乗るため、モニターだけに鳴らすには別のモニター専用ソースが必要になります。
+- ライセンス・保護・OS設定修復まわりの保留事項は [`docs/DEFERRED_NOTES.md`](docs/DEFERRED_NOTES.md) にまとめています。

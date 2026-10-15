@@ -1083,6 +1083,8 @@ struct Params {
     std::atomic<float> bgm_pocket_db{-8.5f};
     std::atomic<int>   bgm_safe_mode{0};        // Singing / recording-safe: -3 dB
     std::atomic<int>   bgm_auto_swell{1};
+    // UNIT 05
+    std::atomic<int>   mono_check{0};            // Collapse the monitored sum to mono.
     // Scene macro bookkeeping
     std::atomic<int>   scene{SCENE_TALK};
 
@@ -1112,6 +1114,7 @@ struct Params {
         presence_eq.store(1); deesser_depth_db.store(8.0f); collab_target_lufs.store(-14.5f);
         collab_duck_db.store(-3.5f); game_ceiling_db.store(-6.0f); game_scoop_db.store(-5.0f);
         bgm_pocket_db.store(-8.5f); bgm_safe_mode.store(0); bgm_auto_swell.store(1); scene.store(SCENE_TALK);
+        mono_check.store(0);
     }
 };
 
@@ -1136,6 +1139,7 @@ struct Telemetry {
     std::atomic<int>   bridge_mode{0};
     std::atomic<int>   acapella_pad{0};
     std::atomic<int>   bgm_swelling{0};
+    std::atomic<int>   bgm_cough_lift{0};
     std::atomic<float> sample_rate{48000.0f};
     std::atomic<int>   channels{2};
     std::atomic<std::uint32_t> scream_defense_count{0}; // Limiter engagements > 3 dB.
@@ -1287,6 +1291,7 @@ private:
         const float game_scoop = params_.game_scoop_db.load();
         const float bgm_pocket = params_.bgm_safe_mode.load() ? -3.0f : params_.bgm_pocket_db.load();
         const bool bgm_swell_on = params_.bgm_auto_swell.load() != 0;
+        const bool mono_check = params_.mono_check.load(std::memory_order_acquire) != 0;
         const bool lfe_layout = (nch == 6 || nch == 8);
 
         // Coefficient refresh when a UI knob moved (cheap: only on change).
@@ -1310,11 +1315,13 @@ private:
         const float voice_hz = bus_ ? bus_->read_voice_center(&voice_act) : 1600.0f;
         const bool acapella = (mode_ == MODE_VOICE) && bus_ && bus_->is_acapella_chat();
         const bool swell = (mode_ == MODE_BGM) && bgm_swell_on && bus_ && bus_->should_bgm_swell();
+        const bool cough_lift = (mode_ == MODE_BGM) && bus_ && bus_->any_cough_active();
         const bool game_loud_now = bus_ ? bus_game_loud() : false;
 
         tele_.bridge_mode.store(bridge ? 1 : 0, std::memory_order_relaxed);
         tele_.acapella_pad.store(acapella ? 1 : 0, std::memory_order_relaxed);
         tele_.bgm_swelling.store(swell ? 1 : 0, std::memory_order_relaxed);
+        tele_.bgm_cough_lift.store(cough_lift ? 1 : 0, std::memory_order_relaxed);
 
         float frame[kMaxChannels];
         float dry_frame[kMaxChannels];
@@ -1348,8 +1355,14 @@ private:
                     case MODE_VOICE:    process_voice_frame(frame, nch, lfe_layout, character, gate_on, whisper, presence, auto_mono, bridge, game_loud_now, pro); break;
                     case MODE_COLLAB:   process_collab_frame(frame, nch, lfe_layout, collab_target, collab_duck, voice_hz, voice_act, pro, duck_db_now); break;
                     case MODE_GAME:     process_game_frame(frame, nch, lfe_layout, game_scoop, voice_hz, voice_act, pro, duck_db_now); break;
-                    case MODE_BGM:      process_bgm_frame(frame, nch, lfe_layout, bgm_pocket, voice_hz, voice_act, swell, pro, duck_db_now); break;
-                    case MODE_DIRECTOR: break; // Metering only; no audio change.
+                    case MODE_BGM:      process_bgm_frame(frame, nch, lfe_layout, bgm_pocket, voice_hz, voice_act, swell, cough_lift, pro, duck_db_now); break;
+                    case MODE_DIRECTOR:
+                        // Metering only; Mono Check folds L/R so phase problems become audible.
+                        if (mono_check && nch >= 2) {
+                            const float m = (frame[0] + frame[1]) * 0.5f;
+                            frame[0] = m; frame[1] = m;
+                        }
+                        break;
                 }
             }
 
@@ -1444,7 +1457,10 @@ private:
             bus_->set_signal_present(rms_db > -60.0f);
             if (mode_ == MODE_VOICE) {
                 bus_->set_mic_muted(mic_muted);
-                bus_->publish_voice_center(pitch_.center_hz(), mic_muted ? 0.0f : pitch_.activity());
+                bus_->set_cough_active(cough_.active());
+                // While muted or cough-muted the voice must not keep ducking others.
+                const bool silenced = mic_muted || cough_.active();
+                bus_->publish_voice_center(pitch_.center_hz(), silenced ? 0.0f : pitch_.activity());
             }
             bus_->beat();
         }
@@ -1626,13 +1642,21 @@ private:
 
     // ---- UNIT 04 // BGM POCKET ---------------------------------------------
     void process_bgm_frame(float* frame, int nch, bool lfe, float pocket_db, float voice_hz,
-                           float voice_act, bool swell, float pro, float& duck_out) noexcept {
+                           float voice_act, bool swell, bool cough_lift, float pro, float& duck_out) noexcept {
         const float depth = pocket_db * clampf(voice_act, 0.0f, 1.0f) * pro;
         duck_env_ += ((depth < duck_env_) ? duck_coeff_att_ : duck_coeff_rel_) * (depth - duck_env_);
         update_voice_notch(voice_hz, duck_env_, nch, lfe);
-        // Auto swell: +4 dB slow rise, 100 ms return.
-        const float swell_t = swell ? db_to_lin(4.0f) : 1.0f;
-        swell_gain_ += ((swell_t > swell_gain_) ? swell_coeff_up_ : swell_coeff_dn_) * (swell_t - swell_gain_);
+        // Auto swell: +4 dB slow rise (AFK), 100 ms return. Cough mute lifts the
+        // BGM +2 dB with a fast 100 ms move so the gap is not heard as silence.
+        float swell_t = 1.0f;
+        float coeff = swell_coeff_dn_;
+        if (swell) {
+            swell_t = db_to_lin(4.0f);
+            if (swell_t > swell_gain_) coeff = swell_coeff_up_;
+        } else if (cough_lift) {
+            swell_t = db_to_lin(2.0f);
+        }
+        swell_gain_ += coeff * (swell_t - swell_gain_);
         if (nch >= 2) {
             // M/S: pocket the Mid only; Side stays untouched.
             const float m = (frame[0] + frame[1]) * 0.5f;

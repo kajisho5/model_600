@@ -17,7 +17,9 @@
 #include <vector>
 
 #include <QApplication>
+#include <QMessageBox>
 #include <QMetaObject>
+#include <QString>
 #include <QPointer>
 #include <QWidget>
 
@@ -25,8 +27,13 @@
 #include "shared-state.hpp"
 #include "custom-ui-dialog.hpp"
 #include "license-manager.hpp"
+#include "voice-command-multilingual.hpp"
 
 using namespace sw::model600;
+
+// Implemented in plugin-main.cpp.
+QString m600_write_chapter(const QString& label);
+QString m600_export_karte();
 
 // -----------------------------------------------------------------------------
 //  Setting keys (stable; part of the saved scene data).
@@ -67,8 +74,8 @@ struct FilterInstance {
     dsp::Engine engine;
     SharedBus bus;
     std::uint32_t trim_rev_seen = 0;
-    std::atomic<bool> trim_pending{false};
-    std::atomic<float> trim_pending_db{0.0f};
+    std::atomic<bool> settings_dirty{false};   // Main thread writes params -> scene data.
+    std::atomic<bool> calib_autocommit{false}; // Voice-started calibration commits itself.
     int cached_channels = 2;
     float cached_rate = 48000.0f;
     QPointer<ui::StudioConsole> console;
@@ -83,6 +90,12 @@ static std::vector<FilterInstance*> g_instances;
 
 // Global licence (shared by all instances; decides Pro availability).
 static license::LicenseManager* g_license = nullptr;
+
+// Latest update version announced by the update checker (UI thread only).
+static QString g_update_version;
+
+static void start_voice_bridge(FilterInstance* f);
+static void stop_voice_bridge(FilterInstance* f);
 
 static void register_instance(FilterInstance* f) {
     std::lock_guard<std::mutex> lk(g_registry_mutex);
@@ -190,12 +203,14 @@ static void* create(obs_data_t* settings, obs_source_t* source) {
     f->trim_rev_seen = 0;
 
     register_instance(f);
+    start_voice_bridge(f);
     blog(LOG_INFO, "[MODEL 600] created unit %d @ %.0f Hz / %d ch", static_cast<int>(mode), static_cast<double>(f->cached_rate), f->cached_channels);
     return f;
 }
 
 static void destroy(void* data) {
     auto* f = static_cast<FilterInstance*>(data);
+    stop_voice_bridge(f);              // Must stop before the tap it reads is freed.
     unregister_instance(f);
     if (f->console) { QMetaObject::invokeMethod(f->console, "close", Qt::QueuedConnection); }
     f->bus.shutdown();                 // Immediate abort of cross-process comms.
@@ -229,8 +244,7 @@ static struct obs_audio_data* filter_audio(void* data, struct obs_audio_data* au
     float trim_db = 0.0f;
     if (f->bus.poll_trim(f->mode, f->trim_rev_seen, trim_db)) {
         f->engine.params().output_trim_db.store(trim_db);
-        f->trim_pending_db.store(trim_db);
-        f->trim_pending.store(true);   // Main thread persists to scene data.
+        f->settings_dirty.store(true);   // Main thread persists to scene data.
     }
 
     float* planar[dsp::kMaxChannels] = {nullptr};
@@ -254,7 +268,18 @@ static bool open_console_clicked(obs_properties_t*, obs_property_t*, void* data)
         auto* con = new ui::StudioConsole(&f->engine, &f->bus, director, pro, parent);
         con->setAttribute(Qt::WA_DeleteOnClose, true);
         f->console = con;
-        con->on_request_chapter = []() { /* routed via plugin-main chapter writer */ };
+        con->on_params_changed = [f]() { f->settings_dirty.store(true); };
+        con->on_request_chapter = []() { m600_write_chapter(QString()); };
+        con->on_export_karte = [con]() {
+            const QString path = m600_export_karte();
+            if (path.isEmpty())
+                QMessageBox::warning(con, QStringLiteral("MODEL 600"),
+                    QStringLiteral("\u30AB\u30EB\u30C6\u3092\u66F8\u304D\u51FA\u305B\u307E\u305B\u3093\u3067\u3057\u305F\u3002 / Could not write the karte."));
+            else
+                QMessageBox::information(con, QStringLiteral("MODEL 600"),
+                    QStringLiteral("\u30AB\u30EB\u30C6\u3092\u4FDD\u5B58\u3057\u307E\u3057\u305F / Karte saved:\n%1").arg(path));
+        };
+        if (!g_update_version.isEmpty()) con->set_update_available(g_update_version);
         con->show();
     }, Qt::QueuedConnection);
     return false;
@@ -329,17 +354,86 @@ static obs_properties_t* get_properties(void* data) {
 //  Main-thread sweep: persist bus-driven trims into scene data (called by the
 //  plugin's frontend timer, never from the audio thread).
 // -----------------------------------------------------------------------------
+// Write the engine's user-facing params back into the source settings so a
+// change made from the console, a voice command or UNIT 05 survives a restart.
+static void write_params_to_settings(FilterInstance* f) {
+    if (!f->source) return;
+    obs_data_t* s = obs_source_get_settings(f->source);
+    if (!s) return;
+    const auto& p = f->engine.params();
+    obs_data_set_double(s, keys::input_gain, static_cast<double>(p.input_gain_db.load()));
+    obs_data_set_double(s, keys::output_trim, static_cast<double>(p.output_trim_db.load()));
+    obs_data_set_int(s, keys::character, p.character.load());
+    obs_data_set_int(s, keys::space_fx, p.space_fx.load());
+    obs_data_set_bool(s, keys::auto_mono, p.auto_mono.load() != 0);
+    obs_data_set_double(s, keys::gate_db, static_cast<double>(p.gate_open_db.load()));
+    obs_data_set_bool(s, keys::mic_muted, p.mic_muted.load() != 0);
+    obs_data_set_double(s, keys::collab_duck, static_cast<double>(p.collab_duck_db.load()));
+    obs_data_set_double(s, keys::game_scoop, static_cast<double>(p.game_scoop_db.load()));
+    obs_data_set_double(s, keys::bgm_pocket, static_cast<double>(p.bgm_pocket_db.load()));
+    obs_data_set_bool(s, keys::bgm_safe, p.bgm_safe_mode.load() != 0);
+    obs_data_release(s);
+}
+
 extern "C" void m600_persist_trims() {
     std::lock_guard<std::mutex> lk(g_registry_mutex);
     for (FilterInstance* f : g_instances) {
-        if (!f->trim_pending.exchange(false)) continue;
-        if (!f->source) continue;
-        obs_data_t* s = obs_source_get_settings(f->source);
-        if (s) {
-            obs_data_set_double(s, keys::output_trim, static_cast<double>(f->trim_pending_db.load()));
-            obs_data_release(s);
+        // A calibration started by voice has no modal to commit it.
+        if (f->calib_autocommit.load() && f->engine.calibrator().done()) {
+            f->calib_autocommit.store(false);
+            if (f->engine.commit_calibration()) {
+                f->settings_dirty.store(true);
+                blog(LOG_INFO, "[MODEL 600] voice calibration committed: %.1f dB",
+                     static_cast<double>(f->engine.calibrator().result_gain_db()));
+            } else {
+                blog(LOG_WARNING, "[MODEL 600] voice calibration not applied (silent=%d clipped=%d)",
+                     f->engine.calibrator().result_silent() ? 1 : 0, f->engine.calibrator().result_clipped() ? 1 : 0);
+            }
         }
+        if (f->settings_dirty.exchange(false)) write_params_to_settings(f);
     }
+}
+
+// Update checker -> amber header lamp on every open console (UI thread).
+void m600_notify_update(const QString& version) {
+    g_update_version = version;
+    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    for (FilterInstance* f : g_instances)
+        if (f->console) f->console->set_update_available(version);
+}
+
+// Per-unit session stats for the audio karte (main thread).
+QString m600_collect_karte_body() {
+    static const char* names[5] = {"[01] VOCAL MASTER", "[02] COLLAB RIDER", "[03] GAME IMPACT",
+                                   "[04] BGM POCKET", "[05] STREAM DIRECTOR"};
+    auto fmt = [](float db) {
+        return db <= -119.0f ? QStringLiteral("-inf") : QString::number(static_cast<double>(db), 'f', 1);
+    };
+    QString out;
+    float master_lufs = -120.0f;
+    std::uint32_t screams = 0;
+    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    for (FilterInstance* f : g_instances) {
+        const auto& t = f->engine.telemetry();
+        const int m = static_cast<int>(f->mode);
+        const float li = t.lufs_i.load();
+        const float pk = t.session_peak_db.load();
+        const std::uint32_t sc = t.scream_defense_count.load();
+        out += QStringLiteral("%1\n  \u5E73\u5747\u30E9\u30A6\u30C9\u30CD\u30B9 / Integrated : %2 LUFS\n"
+                              "  \u6700\u5927\u30D4\u30FC\u30AF / Max peak     : %3 dBTP\n"
+                              "  \u7D76\u53EB\u9632\u885B / Scream saves  : %4\n")
+                   .arg(QString::fromLatin1(names[(m >= 0 && m < 5) ? m : 0]), fmt(li), fmt(pk))
+                   .arg(sc);
+        if (f->mode == MODE_DIRECTOR || (f->mode == MODE_VOICE && master_lufs <= -119.0f)) master_lufs = li;
+        if (f->mode == MODE_VOICE) screams += sc;
+    }
+    if (out.isEmpty()) return QStringLiteral("(\u7A3C\u50CD\u4E2D\u306E\u30E6\u30CB\u30C3\u30C8\u304C\u3042\u308A\u307E\u305B\u3093 / no active units)\n");
+    const bool golden = master_lufs >= -13.5f && master_lufs <= -10.5f;
+    out += QStringLiteral("\n\u7DCF\u5408 / Summary: %1 LUFS%2, \u7D76\u53EB\u9632\u885B %3 \u56DE\n")
+               .arg(fmt(master_lufs),
+                    golden ? QStringLiteral(" \u2713 YOUTUBE LIVE GOLDEN ZONE") : QString())
+               .arg(screams);
+    return out;
 }
 
 // Set the shared licence pointer (owned by plugin-main).
@@ -365,6 +459,209 @@ extern "C" void m600_hotkey_echo_toggle() {
         p.space_fx.store(p.space_fx.load() == dsp::FX_DRY ? dsp::FX_BATH : dsp::FX_DRY);
     }
 }
+
+
+// -----------------------------------------------------------------------------
+//  Voice director (Pro). The platform bridge recognises speech from UNIT 01's
+//  pre-FX tap on its own thread and calls m600_apply_voice_command(); every
+//  change is then applied on the UI thread under the registry lock.
+// -----------------------------------------------------------------------------
+#if defined(MODEL600_PRO_EDITION)
+namespace {
+
+// Exact undo: a snapshot of every voice-reachable parameter before a change.
+struct VoiceSnapshot {
+    float trim_db[kModeCount] = {0, 0, 0, 0, 0};
+    bool  has_mode[kModeCount] = {false, false, false, false, false};
+    int   space_fx = dsp::FX_DRY;
+    int   mic_muted = 0;
+    int   character = dsp::CHAR_BROADCAST;
+    float bgm_pocket = -8.5f, game_scoop = -5.0f, collab_duck = -3.5f;
+    int   bgm_safe = 0;
+};
+constexpr int kUndoDepth = 8;
+VoiceSnapshot g_undo[kUndoDepth];
+int g_undo_top = 0, g_undo_count = 0;
+
+VoiceSnapshot take_snapshot() {
+    VoiceSnapshot snap;
+    for (FilterInstance* f : g_instances) {
+        const int m = static_cast<int>(f->mode);
+        if (m < 0 || m >= kModeCount) continue;
+        const auto& p = f->engine.params();
+        snap.trim_db[m] = p.output_trim_db.load();
+        snap.has_mode[m] = true;
+        if (f->mode == MODE_VOICE) {
+            snap.space_fx = p.space_fx.load();
+            snap.mic_muted = p.mic_muted.load();
+            snap.character = p.character.load();
+        }
+        if (f->mode == MODE_BGM) { snap.bgm_pocket = p.bgm_pocket_db.load(); snap.bgm_safe = p.bgm_safe_mode.load(); }
+        if (f->mode == MODE_GAME) snap.game_scoop = p.game_scoop_db.load();
+        if (f->mode == MODE_COLLAB) snap.collab_duck = p.collab_duck_db.load();
+    }
+    return snap;
+}
+
+void push_undo() {
+    g_undo[g_undo_top] = take_snapshot();
+    g_undo_top = (g_undo_top + 1) % kUndoDepth;
+    if (g_undo_count < kUndoDepth) ++g_undo_count;
+}
+
+bool pop_undo() {
+    if (g_undo_count == 0) return false;
+    g_undo_top = (g_undo_top - 1 + kUndoDepth) % kUndoDepth;
+    --g_undo_count;
+    const VoiceSnapshot& snap = g_undo[g_undo_top];
+    for (FilterInstance* f : g_instances) {
+        const int m = static_cast<int>(f->mode);
+        if (m < 0 || m >= kModeCount || !snap.has_mode[m]) continue;
+        auto& p = f->engine.params();
+        p.output_trim_db.store(snap.trim_db[m]);
+        if (f->mode == MODE_VOICE) {
+            p.space_fx.store(snap.space_fx);
+            p.mic_muted.store(snap.mic_muted);
+            p.character.store(snap.character);
+        }
+        if (f->mode == MODE_BGM) { p.bgm_pocket_db.store(snap.bgm_pocket); p.bgm_safe_mode.store(snap.bgm_safe); }
+        if (f->mode == MODE_GAME) p.game_scoop_db.store(snap.game_scoop);
+        if (f->mode == MODE_COLLAB) p.collab_duck_db.store(snap.collab_duck);
+        f->settings_dirty.store(true);
+    }
+    return true;
+}
+
+bool target_matches(voice::Target t, Mode m) {
+    switch (t) {
+        case voice::Target::VOICE:  return m == MODE_VOICE;
+        case voice::Target::COLLAB: return m == MODE_COLLAB;
+        case voice::Target::GAME:   return m == MODE_GAME;
+        case voice::Target::BGM:    return m == MODE_BGM;
+        case voice::Target::MASTER: return m != MODE_DIRECTOR; // Every audio unit.
+        default: return false;
+    }
+}
+
+// UI thread. Caller does not hold the registry lock.
+void apply_command_main(const voice::Command& c) {
+    bool want_chapter = false;
+    {
+        std::lock_guard<std::mutex> lk(g_registry_mutex);
+        const bool mutates = c.intent != voice::Intent::UNDO && c.intent != voice::Intent::CHAPTER_MARK &&
+                             c.intent != voice::Intent::BLEEP && c.intent != voice::Intent::COUGH_MUTE &&
+                             c.intent != voice::Intent::CALIBRATE;
+        if (mutates) push_undo();
+
+        switch (c.intent) {
+            case voice::Intent::TRIM_DELTA:
+                for (FilterInstance* f : g_instances) {
+                    if (!target_matches(c.target, f->mode)) continue;
+                    auto& p = f->engine.params();
+                    p.output_trim_db.store(voice::apply_voice_trim(p.output_trim_db.load(), c.value_db));
+                    f->settings_dirty.store(true);
+                }
+                break;
+            case voice::Intent::MUTE_MIC:
+            case voice::Intent::UNMUTE_MIC:
+                for (FilterInstance* f : g_instances) if (f->mode == MODE_VOICE) {
+                    f->engine.params().mic_muted.store(c.intent == voice::Intent::MUTE_MIC ? 1 : 0);
+                    f->settings_dirty.store(true);
+                }
+                break;
+            case voice::Intent::BLEEP:
+                for (FilterInstance* f : g_instances) if (f->mode == MODE_VOICE) f->engine.bleep().trigger(1.0f);
+                break;
+            case voice::Intent::COUGH_MUTE:
+                for (FilterInstance* f : g_instances) if (f->mode == MODE_VOICE) f->engine.cough().press(false, 3.0f);
+                break;
+            case voice::Intent::CHAPTER_MARK:
+                want_chapter = true;
+                break;
+            case voice::Intent::FX_SET:
+            case voice::Intent::FX_OFF:
+                for (FilterInstance* f : g_instances) if (f->mode == MODE_VOICE) {
+                    f->engine.params().space_fx.store(c.intent == voice::Intent::FX_OFF ? dsp::FX_DRY : c.fx_mode);
+                    f->settings_dirty.store(true);
+                }
+                break;
+            case voice::Intent::SCENE_SET:
+                for (FilterInstance* f : g_instances) {
+                    f->engine.params().apply_scene(c.scene);
+                    f->settings_dirty.store(true);
+                }
+                break;
+            case voice::Intent::UNDO:
+                if (!pop_undo()) blog(LOG_INFO, "[MODEL 600] voice undo: nothing to undo");
+                break;
+            case voice::Intent::RESET:
+                for (FilterInstance* f : g_instances) {
+                    f->engine.params().factory_reset_keep_calibration();
+                    f->settings_dirty.store(true);
+                }
+                break;
+            case voice::Intent::CALIBRATE:
+                for (FilterInstance* f : g_instances) if (f->mode == MODE_VOICE && !f->engine.calibrator().running()) {
+                    f->engine.start_calibration(10.0f);
+                    f->calib_autocommit.store(true);
+                }
+                break;
+            case voice::Intent::NONE:
+                break;
+        }
+    }
+    // Outside the lock: the chapter writer does file I/O.
+    if (want_chapter) m600_write_chapter(QStringLiteral("見どころ"));
+    blog(LOG_INFO, "[MODEL 600] voice command: %s target=%s value=%.1f conf=%.2f",
+         voice::intent_name(c.intent), voice::target_name(c.target),
+         static_cast<double>(c.value_db), static_cast<double>(c.confidence));
+}
+
+void* g_voice_bridge = nullptr;
+FilterInstance* g_voice_bridge_owner = nullptr;
+
+} // namespace
+
+// Called by the platform bridge on its recognizer thread.
+extern "C" void m600_apply_voice_command(const voice::Command* c) {
+    if (!c || !c->fires()) return;
+    const voice::Command copy = *c;
+    QMetaObject::invokeMethod(qApp, [copy]() { apply_command_main(copy); }, Qt::QueuedConnection);
+}
+
+#if defined(_WIN32)
+extern "C" void* m600_win_voice_start(void* tap, float rate, void (*cb)(const voice::Command*));
+extern "C" void m600_win_voice_stop(void* bridge);
+#elif defined(__APPLE__)
+extern "C" void* m600_mac_voice_start(void* tap, float rate, int lang, void (*cb)(const voice::Command*));
+extern "C" void m600_mac_voice_stop(void* bridge);
+#endif
+
+static void start_voice_bridge(FilterInstance* f) {
+    if (g_voice_bridge || f->mode != MODE_VOICE) return;
+#if defined(_WIN32)
+    g_voice_bridge = m600_win_voice_start(&f->engine.prefx_tap(), f->cached_rate, m600_apply_voice_command);
+#elif defined(__APPLE__)
+    g_voice_bridge = m600_mac_voice_start(&f->engine.prefx_tap(), f->cached_rate,
+                                          static_cast<int>(voice::Lang::AUTO), m600_apply_voice_command);
+#endif
+    if (g_voice_bridge) g_voice_bridge_owner = f;
+}
+
+static void stop_voice_bridge(FilterInstance* f) {
+    if (!g_voice_bridge || g_voice_bridge_owner != f) return;
+#if defined(_WIN32)
+    m600_win_voice_stop(g_voice_bridge);
+#elif defined(__APPLE__)
+    m600_mac_voice_stop(g_voice_bridge);
+#endif
+    g_voice_bridge = nullptr;
+    g_voice_bridge_owner = nullptr;
+}
+#else
+static void start_voice_bridge(FilterInstance*) {}
+static void stop_voice_bridge(FilterInstance*) {}
+#endif
 
 // -----------------------------------------------------------------------------
 //  obs_source_info builders

@@ -388,14 +388,14 @@ void StudioConsole::build_unit01(QVBoxLayout* into) {
     character_->addItems({QStringLiteral("SOFT / ASMR"), QStringLiteral("BROADCAST"), QStringLiteral("FPS / LOUD")});
     character_->setCurrentIndex(engine_->params().character.load());
     connect(character_, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            [this](int i) { engine_->params().character.store(i); });
+            [this](int i) { engine_->params().character.store(i); if (on_params_changed) on_params_changed(); });
 
     space_fx_ = make_combo(unit01_box_);
     space_fx_->addItems({QStringLiteral("DRY"), QStringLiteral("KARAOKE"), QStringLiteral("BATH"),
                          QStringLiteral("HALL"), QStringLiteral("CAVE"), QStringLiteral("RADIO")});
     space_fx_->setCurrentIndex(engine_->params().space_fx.load());
     connect(space_fx_, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            [this](int i) { engine_->params().space_fx.store(i); });
+            [this](int i) { engine_->params().space_fx.store(i); if (on_params_changed) on_params_changed(); });
 
     auto* char_lbl = new QLabel(QStringLiteral("Character"), unit01_box_);
     auto* fx_lbl = new QLabel(QStringLiteral("Space FX"), unit01_box_);
@@ -437,6 +437,7 @@ void StudioConsole::build_unit01(QVBoxLayout* into) {
         const float db = mic_trim_->db();
         engine_->params().output_trim_db.store(db);
         if (bus_) bus_->push_trim(MODE_VOICE, db);
+        if (on_params_changed) on_params_changed();
     });
     trim_row->addWidget(trim_lbl);
     trim_row->addWidget(mic_trim_, 1);
@@ -490,6 +491,10 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
     phase_corr_->setStyleSheet(QStringLiteral("color:#d6d8dc;font-family:monospace;"));
     mono_check_ = new QCheckBox(QStringLiteral("Mono Check"), unit05_box_);
     mono_check_->setStyleSheet(QStringLiteral("color:#d6d8dc;"));
+    mono_check_->setChecked(engine_->params().mono_check.load() != 0);
+    connect(mono_check_, &QCheckBox::toggled, this, [this](bool on) {
+        engine_->params().mono_check.store(on ? 1 : 0);
+    });
     master->addWidget(mlabel);
     master->addWidget(master_lufs_);
     master->addWidget(golden_zone_);
@@ -510,6 +515,7 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
             character_->setCurrentIndex(engine_->params().character.load());
             space_fx_->setCurrentIndex(engine_->params().space_fx.load());
             if (on_scene_macro) on_scene_macro(i);
+            if (on_params_changed) on_params_changed();
         });
         macros->addWidget(scene_btns_[i]);
     }
@@ -738,14 +744,17 @@ void StudioConsole::panic_reset() {
     if (character_) character_->setCurrentIndex(engine_->params().character.load());
     if (space_fx_) space_fx_->setCurrentIndex(engine_->params().space_fx.load());
     if (mic_trim_) mic_trim_->set_db(engine_->params().output_trim_db.load());
+    if (mono_check_) mono_check_->setChecked(false);
     engine_->telemetry().reset_holds();
     engine_->reset_meters();
+    if (on_params_changed) on_params_changed();
 }
 
 void StudioConsole::run_calibration() {
     if (engine_->calibrator().running()) return;
     CalibrationDialog dlg(engine_, &skin_, lang_, this);
     dlg.exec();
+    if (on_params_changed) on_params_changed(); // Persist a committed input gain.
 }
 
 void StudioConsole::start_audition() {
@@ -759,7 +768,8 @@ void StudioConsole::start_audition() {
 }
 
 void StudioConsole::fire_bleep() { engine_->bleep().trigger(3.0f); }
-void StudioConsole::hold_cough() { engine_->cough().press(true); if (bus_) { /* BGM +2dB handled via swell path */ } }
+// UNIT 01 publishes the cough state on the bus; UNIT 04 lifts BGM +2 dB itself.
+void StudioConsole::hold_cough() { engine_->cough().press(true); }
 
 void StudioConsole::set_update_available(const QString& version) {
     update_available_ = true;

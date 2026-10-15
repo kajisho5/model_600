@@ -184,6 +184,9 @@ public:
     std::function<void(int /*scene*/)> on_scene_macro;
     std::function<void()> on_export_karte;
     std::function<void()> on_deactivate_pc;
+    // Fired whenever the console changes an engine parameter, so the host can
+    // write the new values into the OBS scene data.
+    std::function<void()> on_params_changed;
 
 signals:
     void chapterRequested();
