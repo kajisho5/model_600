@@ -19,13 +19,15 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake g++ qt6-base-dev qt6-multimedia-dev libobs-dev
+          sudo apt-get install -y -qq cmake g++ qt6-base-dev qt6-multimedia-dev libobs-dev \
+            fonts-ipafont-gothic fonts-noto-color-emoji
 
       - name: Configure
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
           -DMODEL600_BUILD_TESTS=ON
+          -DMODEL600_BUILD_GUI_SAMPLES=ON
           -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
 
       - name: Build
@@ -36,3 +38,17 @@ jobs:
 
       - name: Python tools sanity
         run: python3 setup_project.py --verify
+
+      - name: Render GUI samples
+        if: matrix.edition == 'pro'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_SCALE_FACTOR: '2'
+        run: ./build/m600_render_gui_samples gui-samples-out
+
+      - name: Upload GUI samples
+        if: matrix.edition == 'pro'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-samples
+          path: gui-samples-out/*.png

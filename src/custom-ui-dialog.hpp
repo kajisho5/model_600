@@ -85,6 +85,8 @@ public:
     void set_values(float peak_db, float rms_db, float hold_db) noexcept;
     void set_gr(float gr_db) noexcept;
     void reset_hold() noexcept;
+    // Horizontal bars are used by the 120 px MINI strip.
+    void set_horizontal(bool horizontal);
     QSize sizeHint() const override;
 protected:
     void paintEvent(QPaintEvent*) override;
@@ -92,6 +94,7 @@ protected:
 private:
     Kind kind_;
     const Skin* skin_;
+    bool horizontal_ = false;
     float peak_db_ = kSilenceFloor, rms_db_ = kSilenceFloor, hold_db_ = kSilenceFloor, gr_db_ = 0.0f;
     static constexpr float kSilenceFloor = -60.0f;
 };
@@ -209,7 +212,8 @@ private slots:
 
 private:
     void build_ui();
-    void build_header(QHBoxLayout* into);
+    void build_header(QVBoxLayout* into);
+    void build_mini_bar(QVBoxLayout* into);
     void build_unit01(QVBoxLayout* into);
     void build_unit05(QVBoxLayout* into);
     void rebuild_chassis_pixmap();
@@ -226,6 +230,13 @@ private:
     QPixmap chassis_;
     qreal   chassis_dpr_ = 0.0;
     QSize   chassis_size_;
+    int     chassis_panel_top_ = -1;
+
+    QWidget* header_box_ = nullptr;   // Two-row header (brand / lamps + buttons).
+    QWidget* body_box_ = nullptr;     // Full console body, hidden in MINI.
+    QWidget* mini_bar_ = nullptr;     // 120 px meter strip, shown in MINI.
+    LedMeter* mini_meter_ = nullptr;
+    QLabel* mini_readout_ = nullptr;
 
     QTimer* timer_ = nullptr;
     bool    pinned_ = false, mini_ = false;
@@ -246,6 +257,9 @@ private:
     LedMeter* mic_gr_ = nullptr;
     QLabel* mic_readout_ = nullptr;
     QLabel* mic_hint_ = nullptr;
+    QLabel* char_lbl_ = nullptr;
+    QLabel* fx_lbl_ = nullptr;
+    QLabel* trim_lbl_ = nullptr;
     QComboBox* character_ = nullptr;
     QComboBox* space_fx_ = nullptr;
     QPushButton* calib_btn_ = nullptr;
@@ -256,6 +270,8 @@ private:
 
     // UNIT 05 section.
     QWidget* unit05_box_ = nullptr;
+    QLabel* unit05_title_ = nullptr;
+    QLabel* master_title_ = nullptr;
     std::array<ChannelStrip*, 4> strips_{nullptr, nullptr, nullptr, nullptr};
     QLabel* master_lufs_ = nullptr;
     QLabel* golden_zone_ = nullptr;

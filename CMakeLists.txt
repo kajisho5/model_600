@@ -19,6 +19,7 @@ project(model600
 
 option(MODEL600_PRO_EDITION "Build the Pro edition (UNIT 05 + voice director)" ON)
 option(MODEL600_BUILD_TESTS "Build the headless Layer-1/2 self-tests" OFF)
+option(MODEL600_BUILD_GUI_SAMPLES "Build the GUI sample renderer (dev tool)" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -146,4 +147,18 @@ if(MODEL600_BUILD_TESTS)
     add_executable(m600_test_voice tests/test_voice.cpp)
     target_include_directories(m600_test_voice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME voice COMMAND m600_test_voice)
+endif()
+
+# --- Optional GUI sample renderer (renders every console screen to PNG) ------
+if(MODEL600_BUILD_GUI_SAMPLES)
+    add_executable(m600_render_gui_samples
+        tools/gui_samples/render_gui_samples.cpp
+        src/custom-ui-dialog.cpp
+        src/custom-ui-dialog.hpp)
+    target_include_directories(m600_render_gui_samples PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    find_package(Threads REQUIRED)
+    target_link_libraries(m600_render_gui_samples PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Threads::Threads)
+    if(NOT WIN32 AND NOT APPLE)
+        target_link_libraries(m600_render_gui_samples PRIVATE rt)
+    endif()
 endif()

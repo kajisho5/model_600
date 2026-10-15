@@ -26,6 +26,10 @@ separate OBS filters (and a future standalone companion app) with no routing.
 The Layer 1/2 code carries no OBS dependency, so it recompiles unchanged for the
 planned Discord VC edition, a VST3 plugin and an iOS companion.
 
+## GUI
+
+全画面のサンプル画像は [`docs/gui-samples/`](docs/gui-samples/README.md) にあります（実装コードを直接描画したもの）。
+
 ## Build
 
 ```bash

@@ -43,7 +43,14 @@ LedMeter::LedMeter(Kind kind, const Skin* skin, QWidget* parent)
     setCursor(Qt::PointingHandCursor);
 }
 
-QSize LedMeter::sizeHint() const { return QSize(22, 160); }
+QSize LedMeter::sizeHint() const { return horizontal_ ? QSize(240, 14) : QSize(22, 160); }
+
+void LedMeter::set_horizontal(bool horizontal) {
+    horizontal_ = horizontal;
+    if (horizontal_) { setMinimumSize(120, 12); setMaximumHeight(16); }
+    else             { setMinimumSize(18, 120); setMaximumHeight(QWIDGETSIZE_MAX); }
+    updateGeometry();
+}
 
 void LedMeter::set_values(float peak_db, float rms_db, float hold_db) noexcept {
     peak_db_ = peak_db; rms_db_ = rms_db; hold_db_ = hold_db;
@@ -83,6 +90,27 @@ void LedMeter::paintEvent(QPaintEvent*) {
     const int peak_lit = static_cast<int>(db_to_frac(peak_db_) * segs);
     const int rms_lit  = static_cast<int>(db_to_frac(rms_db_) * segs);
     const int hold_seg = static_cast<int>(db_to_frac(hold_db_) * segs);
+
+    if (horizontal_) {
+        // Left (quiet) to right (loud), same colour zones as the vertical bar.
+        const int hsegs = 40;
+        const float seg_w = static_cast<float>(r.width()) / static_cast<float>(hsegs);
+        const int hp = static_cast<int>(db_to_frac(peak_db_) * hsegs);
+        const int hr = static_cast<int>(db_to_frac(rms_db_) * hsegs);
+        const int hh = static_cast<int>(db_to_frac(hold_db_) * hsegs);
+        for (int i = 0; i < hsegs; ++i) {
+            const int x = r.left() + static_cast<int>(static_cast<float>(i) * seg_w);
+            const QRect seg(x, r.top(), static_cast<int>(seg_w) - gap, r.height());
+            const float frac = static_cast<float>(i) / static_cast<float>(hsegs);
+            const QColor on = frac > 0.9f ? skin_->led_red : (frac > 0.75f ? skin_->led_yellow : skin_->led_green);
+            QColor c = skin_->led_off;
+            if (i < hp) c = on;
+            if (i < hr) c = on.lighter(130);
+            if (i == hh && hold_db_ > kSilenceFloor) c = skin_->accent;
+            p.fillRect(seg, c);
+        }
+        return;
+    }
 
     for (int i = 0; i < segs; ++i) {
         const int from_bottom = segs - 1 - i;
@@ -185,7 +213,19 @@ CalibrationDialog::CalibrationDialog(dsp::Engine* engine, const Skin* skin, UiLa
                                        : QStringLiteral("10-Second Cue-Card Calibration"));
     setModal(true);
     setMinimumSize(QSize(420, 260));
+    // Same studio palette as the console (not the OS light theme).
+    setStyleSheet(QStringLiteral(
+        "QDialog{background:%1;}"
+        "QLabel{color:%2;}"
+        "QProgressBar{background:%3;border:1px solid #3a3c40;border-radius:4px;color:%2;text-align:center;height:18px;}"
+        "QProgressBar::chunk{background:%4;border-radius:3px;}"
+        "QPushButton{background:%5;color:%2;border:1px solid #3a3c40;border-radius:4px;padding:6px 18px;}"
+        "QPushButton:disabled{color:#5a5d62;}")
+        .arg(skin_->panel.name(), skin_->text.name(), skin_->led_off.name(),
+             skin_->accent.name(), skin_->ear.name()));
     auto* v = new QVBoxLayout(this);
+    v->setContentsMargins(22, 20, 22, 18);
+    v->setSpacing(12);
 
     const L cue{
         QStringLiteral("Read this aloud at your normal streaming voice:\n\n"
@@ -200,6 +240,7 @@ CalibrationDialog::CalibrationDialog(dsp::Engine* engine, const Skin* skin, UiLa
     bar_ = new QProgressBar(this);
     bar_->setRange(0, 1000);
     bar_->setValue(0);
+    bar_->setTextVisible(false);   // Percent is shown in the status line (legible on amber).
 
     status_ = new QLabel(QString(), this);
     status_->setWordWrap(true);
@@ -232,7 +273,11 @@ void CalibrationDialog::showEvent(QShowEvent* e) {
 void CalibrationDialog::tick() {
     auto& c = engine_->calibrator();
     bar_->setValue(static_cast<int>(c.progress() * 1000.0f));
-    if (c.done()) { timer_->stop(); finish(); }
+    if (c.done()) { timer_->stop(); finish(); return; }
+    const int pct = static_cast<int>(c.progress() * 100.0f);
+    status_->setText(lang_ == UiLang::JA
+        ? QStringLiteral("測定中... 声を出し続けてください（%1%）").arg(pct)
+        : QStringLiteral("Measuring... keep talking (%1%)").arg(pct));
 }
 
 void CalibrationDialog::finish() {
@@ -272,7 +317,7 @@ StudioConsole::StudioConsole(dsp::Engine* engine, SharedBus* bus, bool director,
     : QDialog(parent), engine_(engine), bus_(bus), director_(director && pro), pro_(pro) {
     setWindowTitle(QStringLiteral("MODEL 600 // BROADCAST SUITE  —  STUDIO CONSOLE"));
     setMaximumHeight(560);
-    setMinimumWidth(director_ ? 900 : 440);
+    setMinimumWidth(director_ ? 900 : 520);
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     build_ui();
     timer_ = new QTimer(this);
@@ -284,25 +329,42 @@ StudioConsole::~StudioConsole() = default;
 
 void StudioConsole::build_ui() {
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(14, 10, 14, 12);
-    root->setSpacing(8);
+    root->setContentsMargins(30, 8, 30, 10);   // Clears the rack ears.
+    root->setSpacing(6);
 
-    auto* header = new QHBoxLayout();
+    header_box_ = new QWidget(this);
+    auto* header = new QVBoxLayout(header_box_);
+    header->setContentsMargins(0, 0, 0, 0);
+    header->setSpacing(4);
     build_header(header);
-    root->addLayout(header);
+    root->addWidget(header_box_);
 
-    auto* body = new QHBoxLayout();
-    body->setSpacing(10);
-    auto* left = new QVBoxLayout();
-    build_unit01(left);
-    body->addLayout(left, director_ ? 0 : 1);
-    if (director_) {
-        auto* right = new QVBoxLayout();
-        build_unit05(right);
-        body->addLayout(right, 1);
-    }
-    root->addLayout(body, 1);
+    // UNIT 01 consoles show the voice controls; the UNIT 05 console is the
+    // integrated mixer only (its own engine is the metering master, not a mic).
+    body_box_ = new QWidget(this);
+    auto* body = new QVBoxLayout(body_box_);
+    body->setContentsMargins(0, 0, 0, 0);
+    if (director_) build_unit05(body);
+    else           build_unit01(body);
+    root->addWidget(body_box_, 1);
+
+    build_mini_bar(root);
     relabel();
+}
+
+void StudioConsole::build_mini_bar(QVBoxLayout* into) {
+    mini_bar_ = new QWidget(this);
+    auto* v = new QVBoxLayout(mini_bar_);
+    v->setContentsMargins(10, 6, 10, 6);
+    v->setSpacing(4);
+    mini_meter_ = new LedMeter(LedMeter::Level, &skin_, mini_bar_);
+    mini_meter_->set_horizontal(true);
+    mini_readout_ = new QLabel(QString(), mini_bar_);
+    mini_readout_->setStyleSheet(QStringLiteral("color:#d6d8dc;font-family:monospace;"));
+    v->addWidget(mini_meter_);
+    v->addWidget(mini_readout_);
+    mini_bar_->setVisible(false);
+    into->addWidget(mini_bar_);
 }
 
 static QPushButton* make_header_btn(const QString& text, const Skin& s) {
@@ -316,16 +378,22 @@ static QPushButton* make_header_btn(const QString& text, const Skin& s) {
     return b;
 }
 
-void StudioConsole::build_header(QHBoxLayout* into) {
-    auto* brand = new QLabel(QStringLiteral("SEVENTHWELL  │  MODEL 600"));
+void StudioConsole::build_header(QVBoxLayout* into) {
+    // Row 1: brand + (when available) the amber update lamp.
+    auto* row1 = new QHBoxLayout();
+    auto* brand = new QLabel(QStringLiteral("SEVENTHWELL  \u2502  MODEL 600"));
     QFont bf = brand->font(); bf.setBold(true); brand->setFont(bf);
     brand->setStyleSheet(QStringLiteral("color:%1;letter-spacing:1px;").arg(skin_.accent.name()));
-    into->addWidget(brand);
+    row1->addWidget(brand);
+    row1->addStretch(1);
 
-    link_matrix_ = new QLabel(QStringLiteral("[01] [02] [03] [04] [DIR]"));
-    link_matrix_->setStyleSheet(QStringLiteral("color:#5a5d62;font-family:monospace;"));
-    into->addWidget(link_matrix_);
-    into->addStretch(1);
+    // Row 2: LINK MATRIX lamps + window buttons.
+    auto* row2 = new QHBoxLayout();
+    link_matrix_ = new QLabel(QStringLiteral("LINK"));
+    link_matrix_->setTextFormat(Qt::RichText);
+    link_matrix_->setStyleSheet(QStringLiteral("color:#5a5d62;font-size:11px;"));
+    row2->addWidget(link_matrix_);
+    row2->addStretch(1);
 
     pin_btn_ = make_header_btn(QStringLiteral("\U0001F4CC PIN"), skin_);
     mini_btn_ = make_header_btn(QStringLiteral("\U0001F5D5 MINI"), skin_);
@@ -341,11 +409,13 @@ void StudioConsole::build_header(QHBoxLayout* into) {
     connect(lang_btn_, &QPushButton::clicked, this, &StudioConsole::toggle_language);
     connect(reset_btn_, &QPushButton::clicked, this, &StudioConsole::panic_reset);
 
-    into->addWidget(pin_btn_);
-    into->addWidget(mini_btn_);
-    into->addWidget(lang_btn_);
-    into->addWidget(reset_btn_);
-    into->addWidget(update_btn_);
+    row1->addWidget(update_btn_);
+    row2->addWidget(pin_btn_);
+    row2->addWidget(mini_btn_);
+    row2->addWidget(lang_btn_);
+    row2->addWidget(reset_btn_);
+    into->addLayout(row1);
+    into->addLayout(row2);
 }
 
 static QComboBox* make_combo(QWidget* p) {
@@ -381,7 +451,7 @@ void StudioConsole::build_unit01(QVBoxLayout* into) {
     meters->addWidget(mic_level_);
     meters->addWidget(mic_gr_);
     meters->addLayout(mcol, 1);
-    box->addLayout(meters);
+    box->addLayout(meters, 1);   // Meters absorb spare height (taller = finer reading).
 
     auto* grid = new QGridLayout();
     character_ = make_combo(unit01_box_);
@@ -397,17 +467,24 @@ void StudioConsole::build_unit01(QVBoxLayout* into) {
     connect(space_fx_, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [this](int i) { engine_->params().space_fx.store(i); if (on_params_changed) on_params_changed(); });
 
-    auto* char_lbl = new QLabel(QStringLiteral("Character"), unit01_box_);
-    auto* fx_lbl = new QLabel(QStringLiteral("Space FX"), unit01_box_);
-    char_lbl->setStyleSheet(QStringLiteral("color:#9a9da2;"));
-    fx_lbl->setStyleSheet(QStringLiteral("color:#9a9da2;"));
-    grid->addWidget(char_lbl, 0, 0); grid->addWidget(character_, 0, 1);
-    grid->addWidget(fx_lbl, 1, 0); grid->addWidget(space_fx_, 1, 1);
+    char_lbl_ = new QLabel(unit01_box_);
+    fx_lbl_ = new QLabel(unit01_box_);
+    char_lbl_->setStyleSheet(QStringLiteral("color:#9a9da2;"));
+    fx_lbl_->setStyleSheet(QStringLiteral("color:#9a9da2;"));
+    grid->addWidget(char_lbl_, 0, 0); grid->addWidget(character_, 0, 1);
+    grid->addWidget(fx_lbl_, 1, 0); grid->addWidget(space_fx_, 1, 1);
+    grid->setColumnStretch(1, 1);
     box->addLayout(grid);
 
     auto* actions = new QHBoxLayout();
     calib_btn_ = new QPushButton(QStringLiteral("\U0001F3A4 10s CALIBRATE"), unit01_box_);
     audition_btn_ = new QPushButton(QStringLiteral("\U0001F501 A/B AUDITION"), unit01_box_);
+    const QString action_style = QStringLiteral(
+        "QPushButton{background:#2c2e32;color:#d6d8dc;border:1px solid #3a3c40;border-radius:4px;padding:6px;}"
+        "QPushButton:checked{background:%1;color:#1a1a1a;}").arg(skin_.accent.name());
+    calib_btn_->setStyleSheet(action_style);
+    audition_btn_->setStyleSheet(action_style);
+    audition_btn_->setCheckable(true);
     connect(calib_btn_, &QPushButton::clicked, this, &StudioConsole::run_calibration);
     connect(audition_btn_, &QPushButton::clicked, this, &StudioConsole::start_audition);
     actions->addWidget(calib_btn_);
@@ -428,8 +505,8 @@ void StudioConsole::build_unit01(QVBoxLayout* into) {
     box->addLayout(emergency);
 
     auto* trim_row = new QHBoxLayout();
-    auto* trim_lbl = new QLabel(QStringLiteral("OUTPUT TRIM"), unit01_box_);
-    trim_lbl->setStyleSheet(QStringLiteral("color:#9a9da2;"));
+    trim_lbl_ = new QLabel(unit01_box_);
+    trim_lbl_->setStyleSheet(QStringLiteral("color:#9a9da2;"));
     mic_trim_ = new TrimFader(unit01_box_);
     mic_trim_->setOrientation(Qt::Horizontal);
     mic_trim_->set_db(engine_->params().output_trim_db.load());
@@ -439,13 +516,11 @@ void StudioConsole::build_unit01(QVBoxLayout* into) {
         if (bus_) bus_->push_trim(MODE_VOICE, db);
         if (on_params_changed) on_params_changed();
     });
-    trim_row->addWidget(trim_lbl);
+    trim_row->addWidget(trim_lbl_);
     trim_row->addWidget(mic_trim_, 1);
     box->addLayout(trim_row);
 
-    unit01_box_->setStyleSheet(QStringLiteral("QWidget{background:transparent;}"));
-    into->addWidget(unit01_box_);
-    into->addStretch(1);
+    into->addWidget(unit01_box_, 1);
 }
 
 void StudioConsole::attach_strip(ChannelStrip* strip) {
@@ -460,10 +535,10 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
     box->setContentsMargins(10, 8, 10, 10);
     box->setSpacing(6);
 
-    auto* title = new QLabel(QStringLiteral("[05] STREAM DIRECTOR  —  MASTER TELEMETRY"));
-    QFont tf = title->font(); tf.setBold(true); title->setFont(tf);
-    title->setStyleSheet(QStringLiteral("color:%1;").arg(skin_.text.name()));
-    box->addWidget(title);
+    unit05_title_ = new QLabel(unit05_box_);
+    QFont tf = unit05_title_->font(); tf.setBold(true); unit05_title_->setFont(tf);
+    unit05_title_->setStyleSheet(QStringLiteral("color:%1;").arg(skin_.text.name()));
+    box->addWidget(unit05_title_);
 
     auto* strips = new QHBoxLayout();
     strips->setSpacing(4);
@@ -481,8 +556,9 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
 
     // Virtual master sum column.
     auto* master = new QVBoxLayout();
-    auto* mlabel = new QLabel(QStringLiteral("VIRTUAL MASTER SUM"), unit05_box_);
-    mlabel->setStyleSheet(QStringLiteral("color:#9a9da2;font-size:11px;"));
+    master_title_ = new QLabel(unit05_box_);
+    master_title_->setStyleSheet(QStringLiteral("color:#9a9da2;font-size:11px;"));
+    master_title_->setMinimumWidth(190);
     master_lufs_ = new QLabel(QStringLiteral("M -∞  S -∞\nI -∞ LUFS"), unit05_box_);
     master_lufs_->setStyleSheet(QStringLiteral("color:#d6d8dc;font-family:monospace;"));
     golden_zone_ = new QLabel(QStringLiteral("—"), unit05_box_);
@@ -495,7 +571,7 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
     connect(mono_check_, &QCheckBox::toggled, this, [this](bool on) {
         engine_->params().mono_check.store(on ? 1 : 0);
     });
-    master->addWidget(mlabel);
+    master->addWidget(master_title_);
     master->addWidget(master_lufs_);
     master->addWidget(golden_zone_);
     master->addWidget(phase_corr_);
@@ -512,8 +588,8 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
         scene_btns_[i]->setStyleSheet(QStringLiteral("QPushButton{background:#2c2e32;color:#d6d8dc;border:1px solid #3a3c40;border-radius:4px;padding:5px;}"));
         connect(scene_btns_[i], &QPushButton::clicked, this, [this, i] {
             engine_->params().apply_scene(i);
-            character_->setCurrentIndex(engine_->params().character.load());
-            space_fx_->setCurrentIndex(engine_->params().space_fx.load());
+            if (character_) character_->setCurrentIndex(engine_->params().character.load());
+            if (space_fx_) space_fx_->setCurrentIndex(engine_->params().space_fx.load());
             if (on_scene_macro) on_scene_macro(i);
             if (on_params_changed) on_params_changed();
         });
@@ -524,6 +600,10 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
     auto* exports = new QHBoxLayout();
     chapter_btn_ = new QPushButton(QStringLiteral("\U0001F4D1 CHAPTER MARK"), unit05_box_);
     karte_btn_ = new QPushButton(QStringLiteral("\U0001F4CA EXPORT KARTE"), unit05_box_);
+    const QString export_style = QStringLiteral(
+        "QPushButton{background:#2c2e32;color:#d6d8dc;border:1px solid #3a3c40;border-radius:4px;padding:6px;}");
+    chapter_btn_->setStyleSheet(export_style);
+    karte_btn_->setStyleSheet(export_style);
     connect(chapter_btn_, &QPushButton::clicked, this, [this] { emit chapterRequested(); if (on_request_chapter) on_request_chapter(); });
     connect(karte_btn_, &QPushButton::clicked, this, [this] { if (on_export_karte) on_export_karte(); });
     exports->addWidget(chapter_btn_);
@@ -541,8 +621,9 @@ void StudioConsole::build_unit05(QVBoxLayout* into) {
 void StudioConsole::rebuild_chassis_pixmap() {
     const qreal dpr = devicePixelRatioF();
     const QSize sz = size();
-    if (dpr == chassis_dpr_ && sz == chassis_size_ && !chassis_.isNull()) return;
-    chassis_dpr_ = dpr; chassis_size_ = sz;
+    const int panel_top = header_box_ ? header_box_->geometry().bottom() + 6 : 40;
+    if (dpr == chassis_dpr_ && sz == chassis_size_ && panel_top == chassis_panel_top_ && !chassis_.isNull()) return;
+    chassis_dpr_ = dpr; chassis_size_ = sz; chassis_panel_top_ = panel_top;
     chassis_ = QPixmap(sz * dpr);
     chassis_.setDevicePixelRatio(dpr);
     chassis_.fill(Qt::transparent);
@@ -577,7 +658,7 @@ void StudioConsole::rebuild_chassis_pixmap() {
     screw(r.width() - ear_w / 2, 12); screw(r.width() - ear_w / 2, r.height() - 12);
 
     // Inner recessed panel.
-    const QRectF panel = r.adjusted(ear_w + 6, 40, -(ear_w + 6), -6);
+    const QRectF panel = r.adjusted(ear_w + 4, panel_top, -(ear_w + 4), -6);
     p.setBrush(skin_.panel);
     p.setPen(QPen(skin_.chassis_bottom.darker(140), 1));
     p.drawRoundedRect(panel, 6, 6);
@@ -591,6 +672,13 @@ void StudioConsole::paintEvent(QPaintEvent*) {
 
 void StudioConsole::refresh() {
     auto& t = engine_->telemetry();
+    if (mini_ && mini_meter_) {
+        mini_meter_->set_values(t.true_peak_db.load(), t.rms_db.load(), t.peak_hold_db.load());
+        mini_meter_->update();
+        const QString unit = director_ ? QStringLiteral("MASTER") : QStringLiteral("[01]");
+        mini_readout_->setText(QStringLiteral("%1  %2 dBTP   S %3 LUFS   GR %4 dB")
+            .arg(unit, fmt_db(t.true_peak_db.load()), fmt_db(t.lufs_s.load()), fmt_db(t.gr_db.load())));
+    }
     // UNIT 01 meters.
     if (mic_level_) {
         mic_level_->set_values(t.true_peak_db.load(), t.rms_db.load(), t.peak_hold_db.load());
@@ -626,14 +714,13 @@ void StudioConsole::refresh() {
             const int m = s.mode.load();
             if (m >= 0 && m < 5) live[m] = true;
         }
-        const char* tags[5] = {"[01]", "[02]", "[03]", "[04]", "[DIR]"};
-        QString s;
+        const char* tags[5] = {"01", "02", "03", "04", "DIR"};
+        QString s = QStringLiteral("<span style='color:#7a7d82'>LINK</span>&nbsp;");
         for (int i = 0; i < 5; ++i) {
-            s += live[i] ? QStringLiteral("<span style='color:%1'>%2</span> ").arg(skin_.led_green.name(), QString::fromLatin1(tags[i]))
-                         : QStringLiteral("<span style='color:#4a4d52'>%1</span> ").arg(QString::fromLatin1(tags[i]));
+            s += live[i] ? QStringLiteral("<span style='color:%1'>\u25CF%2</span>&nbsp;").arg(skin_.led_green.name(), QString::fromLatin1(tags[i]))
+                         : QStringLiteral("<span style='color:#4a4d52'>\u25CB%1</span>&nbsp;").arg(QString::fromLatin1(tags[i]));
         }
         link_matrix_->setText(s);
-        link_matrix_->setTextFormat(Qt::RichText);
     }
 
     // UNIT 05 strips pull their peers' telemetry from the bus.
@@ -703,20 +790,20 @@ void StudioConsole::toggle_pin() {
 }
 
 void StudioConsole::toggle_mini() {
+    // MINI folds the console into a ~120 px strip: header + one horizontal
+    // meter + a one-line readout. The full body is hidden, not destroyed.
     mini_ = mini_btn_->isChecked();
-    if (unit05_box_) unit05_box_->setVisible(!mini_);
-    if (unit01_box_) {
-        // Collapse to a 120px meter bar: hide controls, keep meters.
-        const bool full = !mini_;
-        for (QObject* c : unit01_box_->children()) {
-            if (auto* w = qobject_cast<QWidget*>(c)) {
-                if (w == mic_level_ || w == mic_gr_ || w == mic_readout_) continue;
-                w->setVisible(full);
-            }
-        }
+    body_box_->setVisible(!mini_);
+    mini_bar_->setVisible(mini_);
+    if (mini_) {
+        setMinimumHeight(0);
+        setMaximumHeight(130);
+        resize(width(), minimumSizeHint().height());
+    } else {
+        setMaximumHeight(560);
+        resize(width(), 560);
     }
-    setMaximumHeight(mini_ ? 150 : 560);
-    adjustSize();
+    refresh();
 }
 
 void StudioConsole::toggle_language() {
@@ -735,6 +822,18 @@ void StudioConsole::relabel() {
     if (chapter_btn_) chapter_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F4D1 チャプター記録") : QStringLiteral("\U0001F4D1 CHAPTER MARK"));
     if (karte_btn_) karte_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F4CA カルテ出力") : QStringLiteral("\U0001F4CA EXPORT KARTE"));
     if (deactivate_btn_) deactivate_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("このPCの認証を解除") : QStringLiteral("DEACTIVATE THIS PC"));
+    const bool ja = (lang_ == UiLang::JA);
+    if (char_lbl_) char_lbl_->setText(ja ? QStringLiteral("キャラクター") : QStringLiteral("Character"));
+    if (fx_lbl_) fx_lbl_->setText(ja ? QStringLiteral("空間エフェクト") : QStringLiteral("Space FX"));
+    if (trim_lbl_) trim_lbl_->setText(ja ? QStringLiteral("出力トリム") : QStringLiteral("OUTPUT TRIM"));
+    if (unit05_title_) unit05_title_->setText(ja ? QStringLiteral("[05] 統合ミキサー＆声ディレクター")
+                                                 : QStringLiteral("[05] STREAM DIRECTOR  \u2014  MASTER TELEMETRY"));
+    if (master_title_) master_title_->setText(ja ? QStringLiteral("仮想マスター合算") : QStringLiteral("VIRTUAL MASTER SUM"));
+    if (mono_check_) mono_check_->setText(ja ? QStringLiteral("モノラル確認") : QStringLiteral("Mono Check"));
+    static const char* scene_en[4] = {"FPS/GAME", "TALK", "SINGING", "ASMR"};
+    const QString scene_ja[4] = {QStringLiteral("FPS/ゲーム"), QStringLiteral("雑談"), QStringLiteral("歌枠"), QStringLiteral("ASMR")};
+    for (int i = 0; i < 4; ++i)
+        if (scene_btns_[i]) scene_btns_[i]->setText(ja ? scene_ja[i] : QString::fromLatin1(scene_en[i]));
     for (auto& hook : relabel_hooks_) hook();
     update();
 }
