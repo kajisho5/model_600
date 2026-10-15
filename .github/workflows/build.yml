@@ -22,6 +22,15 @@ jobs:
           sudo apt-get install -y -qq cmake g++ qt6-base-dev libobs-dev \
             fonts-ipafont-gothic fonts-noto-color-emoji
 
+      - name: Cache voice model
+        if: matrix.edition == 'pro'
+        uses: actions/cache@v4
+        with:
+          path: build/models
+          key: whisper-model-${{ hashFiles('cmake/whisper.cmake') }}
+
+      # Pro also builds the embedded recognizer (the macOS voice engine) and
+      # runs its end-to-end test on recorded command clips.
       - name: Configure
         run: >
           cmake -S . -B build
@@ -29,6 +38,7 @@ jobs:
           -DMODEL600_BUILD_TESTS=ON
           -DMODEL600_BUILD_GUI_SAMPLES=ON
           -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
+          -DMODEL600_WHISPER_TESTS=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
 
       - name: Build
         run: cmake --build build --parallel
@@ -80,6 +90,13 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then root="$(cygpath -m "$root")"; fi
           echo "OBS_SDK=$root" >> "$GITHUB_ENV"
 
+      - name: Cache voice model
+        if: runner.os == 'macOS' && matrix.edition == 'pro'
+        uses: actions/cache@v4
+        with:
+          path: build/models
+          key: whisper-model-${{ hashFiles('cmake/whisper.cmake') }}
+
       - name: Cache OBS SDK
         id: obs-cache
         uses: actions/cache@v4
@@ -108,6 +125,7 @@ jobs:
             -DMODEL600_BUILD_PORTABLE_CHECK=ON \
             -DMODEL600_BUILD_TESTS=ON \
             -DMODEL600_BUILD_GUI_SAMPLES=ON \
+            -DMODEL600_WHISPER_TESTS=${{ (runner.os == 'macOS' && matrix.edition == 'pro') && 'ON' || 'OFF' }} \
             -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
 
       - name: Build
@@ -120,7 +138,7 @@ jobs:
         shell: bash
         run: |
           # Install layout = what the user copies into OBS.
-          cmake --install build --config Release --prefix pkg
+          cmake --install build --config Release --prefix pkg --component model600
           name="model600-${{ runner.os }}-${{ matrix.edition }}"
           mkdir -p dist
           if [ "$RUNNER_OS" = "macOS" ]; then
@@ -128,16 +146,26 @@ jobs:
             lipo -info "$bin" build/m600_test_dsp
             file "$bin" | grep -q "bundle" || { echo "not an MH_BUNDLE"; exit 1; }
             plutil -lint pkg/model600.plugin/Contents/Info.plist
+            # No Accelerate "new LAPACK" imports (macOS 13.3+ only); minimum OS stays 12.0.
+            if nm -um "$bin" | grep -q NEWLAPACK; then echo "NEWLAPACK symbols imported"; exit 1; fi
+            otool -l "$bin" | grep -A3 LC_BUILD_VERSION | grep minos
+            model=pkg/model600.plugin/Contents/Resources/ggml-base-q5_1.bin
+            if [ "${{ matrix.edition }}" = "pro" ]; then
+              echo "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898  $model" | shasum -a 256 -c
+            elif [ -e "$model" ]; then
+              echo "Standard must not ship the voice model"; exit 1
+            fi
             plutil -p pkg/model600.plugin/Contents/Info.plist
             # Ad-hoc signature over the whole bundle (no Developer ID yet).
             codesign --force --sign - pkg/model600.plugin
             codesign --verify --strict --verbose=2 pkg/model600.plugin
-            cp install_mac.command pkg/
+            cp install_mac.command THIRD_PARTY_NOTICES.md pkg/
             (cd pkg && ditto -c -k --keepParent model600.plugin "../dist/$name.zip" \
-              && zip -q "../dist/$name.zip" install_mac.command)
+              && zip -q "../dist/$name.zip" install_mac.command THIRD_PARTY_NOTICES.md)
           else
             ls -l pkg/obs-plugins/64bit/model600.dll
-            (cd pkg && 7z a -tzip "../dist/$name.zip" obs-plugins >/dev/null)
+            cp THIRD_PARTY_NOTICES.md pkg/
+            (cd pkg && 7z a -tzip "../dist/$name.zip" obs-plugins THIRD_PARTY_NOTICES.md >/dev/null)
           fi
           unzip -l "dist/$name.zip"
 

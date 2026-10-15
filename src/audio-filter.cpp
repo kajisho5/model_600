@@ -28,6 +28,9 @@
 #include "custom-ui-dialog.hpp"
 #include "license-manager.hpp"
 #include "voice-command-multilingual.hpp"
+#if defined(MODEL600_VOICE_WHISPER)
+#include "voice-whisper.hpp"
+#endif
 
 using namespace sw::model600;
 
@@ -629,34 +632,49 @@ extern "C" void m600_apply_voice_command(const voice::Command* c) {
     QMetaObject::invokeMethod(qApp, [copy]() { apply_command_main(copy); }, Qt::QueuedConnection);
 }
 
-#if defined(_WIN32)
+#if defined(MODEL600_VOICE_WHISPER)
+// Embedded recognizer: model from the module data dir (macOS: bundle Resources).
+static void* m600_whisper_voice_start(dsp::PreFxTap* tap, float rate) {
+    char* model = obs_module_file(voice::kWhisperModelFile);
+    if (!model) {
+        blog(LOG_WARNING, "[MODEL 600] voice director unavailable: %s not found in the plugin data folder",
+             voice::kWhisperModelFile);
+        return nullptr;
+    }
+    voice::WhisperEngine::set_log_sink([](const char* line) { blog(LOG_WARNING, "[MODEL 600] whisper: %s", line); });
+    auto* bridge = new voice::WhisperVoiceBridge(
+        model, static_cast<double>(rate), voice::Lang::AUTO,
+        [tap](float* out, int max) { return tap->pop(out, max); },
+        [](const voice::Command& c) { m600_apply_voice_command(&c); });
+    blog(LOG_INFO, "[MODEL 600] voice director: embedded recognizer, model %s", model);
+    bfree(model);
+    bridge->start();
+    return bridge;
+}
+static void m600_whisper_voice_stop(void* bridge) {
+    delete static_cast<voice::WhisperVoiceBridge*>(bridge);   // Joins both threads.
+}
+#elif defined(_WIN32)
 extern "C" void* m600_win_voice_start(void* tap, float rate, void (*cb)(const voice::Command*));
 extern "C" void m600_win_voice_stop(void* bridge);
-#elif defined(__APPLE__)
-extern "C" void* m600_mac_voice_start(void* tap, float rate, int lang, void (*cb)(const voice::Command*));
-extern "C" void m600_mac_voice_stop(void* bridge);
 #endif
 
 static void start_voice_bridge(FilterInstance* f) {
     if (g_voice_bridge || f->mode != MODE_VOICE) return;
-#if defined(_WIN32)
+#if defined(MODEL600_VOICE_WHISPER)
+    g_voice_bridge = m600_whisper_voice_start(&f->engine.prefx_tap(), f->cached_rate);
+#elif defined(_WIN32)
     g_voice_bridge = m600_win_voice_start(&f->engine.prefx_tap(), f->cached_rate, m600_apply_voice_command);
-#elif defined(__APPLE__)
-    g_voice_bridge = m600_mac_voice_start(&f->engine.prefx_tap(), f->cached_rate,
-                                          static_cast<int>(voice::Lang::AUTO), m600_apply_voice_command);
-    if (!g_voice_bridge)
-        blog(LOG_WARNING, "[MODEL 600] voice director unavailable: the OBS app bundle does not declare "
-                          "NSSpeechRecognitionUsageDescription, so macOS speech recognition cannot be used.");
 #endif
     if (g_voice_bridge) g_voice_bridge_owner = f;
 }
 
 static void stop_voice_bridge(FilterInstance* f) {
     if (!g_voice_bridge || g_voice_bridge_owner != f) return;
-#if defined(_WIN32)
+#if defined(MODEL600_VOICE_WHISPER)
+    m600_whisper_voice_stop(g_voice_bridge);
+#elif defined(_WIN32)
     m600_win_voice_stop(g_voice_bridge);
-#elif defined(__APPLE__)
-    m600_mac_voice_stop(g_voice_bridge);
 #endif
     g_voice_bridge = nullptr;
     g_voice_bridge_owner = nullptr;

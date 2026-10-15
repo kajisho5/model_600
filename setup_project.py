@@ -46,7 +46,10 @@ EXPECTED = [
     "resources/hw/hw.json",
     "resources/macos/Info.plist.in",
     "src/voice-command-win.cpp",
-    "src/voice-command-mac.mm",
+    "src/voice-whisper.hpp",
+    "src/voice-whisper.cpp",
+    "src/voice-segmenter.hpp",
+    "cmake/whisper.cmake",
     "src/audio-filter.cpp",
     "src/plugin-main.cpp",
 ]

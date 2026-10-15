@@ -23,6 +23,15 @@ option(MODEL600_BUILD_GUI_SAMPLES "Build the GUI sample renderer (dev tool)" OFF
 option(MODEL600_BUILD_PLUGIN "Build the OBS plugin module (needs the libobs SDK)" ON)
 option(MODEL600_BUILD_PORTABLE_CHECK
        "Compile every OBS-independent source with warnings as errors (CI on Windows / macOS)" OFF)
+# Voice director engine. macOS: embedded whisper.cpp (the OS speech service is
+# unusable inside OBS, see README). Windows: SAPI. Linux: none by default.
+if(APPLE)
+    set(m600_whisper_default ON)
+else()
+    set(m600_whisper_default OFF)
+endif()
+option(MODEL600_VOICE_WHISPER "Voice director uses the embedded whisper.cpp recognizer (Pro)" ${m600_whisper_default})
+option(MODEL600_WHISPER_TESTS "Build the whisper end-to-end test (needs MODEL600_BUILD_TESTS)" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,9 +59,6 @@ if(APPLE)
     if(NOT CMAKE_OSX_ARCHITECTURES)
         set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
     endif()
-    enable_language(OBJCXX)
-    # voice-command-mac.mm uses __weak captures, which require ARC.
-    set_source_files_properties(src/voice-command-mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
         set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
     endif()
@@ -61,6 +67,16 @@ endif()
 # --- Qt ----------------------------------------------------------------------
 set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+
+# --- Embedded speech recognizer (whisper.cpp) --------------------------------
+set(M600_PLUGIN_WHISPER OFF)
+if(MODEL600_BUILD_PLUGIN AND MODEL600_PRO_EDITION AND MODEL600_VOICE_WHISPER)
+    set(M600_PLUGIN_WHISPER ON)
+endif()
+if(M600_PLUGIN_WHISPER OR (MODEL600_BUILD_TESTS AND MODEL600_WHISPER_TESTS)
+   OR (MODEL600_BUILD_PORTABLE_CHECK AND MODEL600_PRO_EDITION AND MODEL600_VOICE_WHISPER))
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/whisper.cmake)
+endif()
 
 if(MODEL600_BUILD_PLUGIN)
 # --- libobs + frontend-api ---------------------------------------------------
@@ -141,13 +157,28 @@ else()
                     "The console will fall back to plain drawing.")
 endif()
 
-if(WIN32)
+if(M600_PLUGIN_WHISPER)
+    list(APPEND MODEL600_SOURCES src/voice-whisper.cpp src/voice-whisper.hpp src/voice-segmenter.hpp)
+elseif(WIN32)
     list(APPEND MODEL600_SOURCES src/voice-command-win.cpp)
-elseif(APPLE)
-    list(APPEND MODEL600_SOURCES src/voice-command-mac.mm)
 endif()
 
 add_library(model600 MODULE ${MODEL600_SOURCES} ${MODEL600_HEADERS})
+
+if(M600_PLUGIN_WHISPER)
+    target_link_libraries(model600 PRIVATE whisper)
+    target_compile_definitions(model600 PRIVATE MODEL600_VOICE_WHISPER=1)
+    if(NOT APPLE AND NOT MSVC)
+        # Keep the embedded ggml/whisper symbols private to this module, so
+        # another plugin bundling its own whisper.cpp can never bind to ours.
+        target_link_options(model600 PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
+    if(APPLE)
+        # Ships in model600.plugin/Contents/Resources (the module data path).
+        target_sources(model600 PRIVATE "${M600_WHISPER_MODEL}")
+        set_source_files_properties("${M600_WHISPER_MODEL}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    endif()
+endif()
 
 target_include_directories(model600 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 qt_add_resources(model600 "m600_ui" PREFIX "/m600" BASE "resources" FILES ${MODEL600_UI_RESOURCES})
@@ -176,8 +207,6 @@ else()
 endif()
 
 if(APPLE)
-    target_link_libraries(model600 PRIVATE
-        "-framework Foundation" "-framework Speech" "-framework AVFoundation")
     # Loadable bundle, the layout OBS scans in ~/Library/Application Support/obs-studio/plugins:
     # model600.plugin/Contents/{Info.plist, MacOS/model600}.
     string(TIMESTAMP M600_YEAR "%Y")
@@ -199,11 +228,17 @@ endif()
 # --- Install (standard OBS plugin layout) ------------------------------------
 if(WIN32)
     # A MODULE library is a LIBRARY artifact on every platform, .dll included.
-    install(TARGETS model600 LIBRARY DESTINATION obs-plugins/64bit)
+    install(TARGETS model600 LIBRARY DESTINATION obs-plugins/64bit COMPONENT model600)
+    set(m600_data_dir data/obs-plugins/model600)
 elseif(APPLE)
-    install(TARGETS model600 LIBRARY DESTINATION .)
+    install(TARGETS model600 LIBRARY DESTINATION . COMPONENT model600)
 else()
-    install(TARGETS model600 LIBRARY DESTINATION lib/obs-plugins)
+    install(TARGETS model600 LIBRARY DESTINATION lib/obs-plugins COMPONENT model600)
+    set(m600_data_dir share/obs/obs-plugins/model600)
+endif()
+# On macOS the model is already inside the bundle.
+if(M600_PLUGIN_WHISPER AND NOT APPLE)
+    install(FILES "${M600_WHISPER_MODEL}" DESTINATION ${m600_data_dir} COMPONENT model600)
 endif()
 
 endif() # MODEL600_BUILD_PLUGIN
@@ -223,6 +258,16 @@ if(MODEL600_BUILD_TESTS)
     add_executable(m600_test_voice tests/test_voice.cpp)
     target_include_directories(m600_test_voice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME voice COMMAND m600_test_voice)
+
+    if(MODEL600_WHISPER_TESTS)
+        add_executable(m600_test_whisper tests/test_whisper.cpp src/voice-whisper.cpp)
+        target_include_directories(m600_test_whisper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(m600_test_whisper PRIVATE whisper Threads::Threads)
+        m600_strict_warnings(m600_test_whisper)
+        add_test(NAME whisper COMMAND m600_test_whisper "${M600_WHISPER_MODEL}"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/voice")
+        set_tests_properties(whisper PROPERTIES TIMEOUT 600)
+    endif()
 endif()
 
 # --- Optional portable compile check (no OBS SDK needed) ---------------------
@@ -235,10 +280,14 @@ if(MODEL600_BUILD_PORTABLE_CHECK)
         src/update-checker.hpp)
     if(WIN32)
         list(APPEND M600_PORTABLE_SOURCES src/voice-command-win.cpp)
-    elseif(APPLE)
-        list(APPEND M600_PORTABLE_SOURCES src/voice-command-mac.mm)
+    endif()
+    if(MODEL600_PRO_EDITION AND MODEL600_VOICE_WHISPER)
+        list(APPEND M600_PORTABLE_SOURCES src/voice-whisper.cpp)
     endif()
     add_library(m600_portable_check OBJECT ${M600_PORTABLE_SOURCES})
+    if(MODEL600_PRO_EDITION AND MODEL600_VOICE_WHISPER)
+        target_link_libraries(m600_portable_check PRIVATE whisper)
+    endif()
     target_include_directories(m600_portable_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(m600_portable_check PRIVATE
         Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)

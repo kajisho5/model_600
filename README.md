@@ -17,11 +17,28 @@ separate OBS filters (and a future standalone companion app) with no routing.
 ## Architecture (3-layer, OBS confined to ~5%)
 
 - **Layer 1 (portable, pure C++20)** — `shared-state.hpp`, `dsp-core.hpp`,
-  `voice-command-multilingual.hpp`
-- **Layer 2 (portable + Qt)** — `license-manager.hpp`, `update-checker.hpp`,
-  `os-conflict-shield.hpp`, `custom-ui-dialog.{hpp,cpp}`
+  `voice-command-multilingual.hpp`, `voice-segmenter.hpp`
+- **Layer 2 (portable + Qt / whisper.cpp)** — `license-manager.hpp`, `update-checker.hpp`,
+  `os-conflict-shield.hpp`, `custom-ui-dialog.{hpp,cpp}`, `voice-whisper.{hpp,cpp}`
 - **Layer 3 (OBS adapters)** — `audio-filter.cpp`, `plugin-main.cpp`,
-  `voice-command-win.cpp`, `voice-command-mac.mm`
+  `voice-command-win.cpp`
+
+## 音声ディレクターのエンジン / Voice director engine
+
+| OS | 認識エンジン | 備考 |
+|----|------------|------|
+| Windows | SAPI（OS 標準） | |
+| macOS | 内蔵 whisper.cpp（`ggml-base-q5_1.bin`, 約 60 MB をバンドル同梱） | 許可ダイアログなし・完全オンデバイス |
+| Linux | なし（`-DMODEL600_VOICE_WHISPER=ON` で内蔵エンジンを有効化可） | |
+
+macOS は OS 標準の音声認識を使えないため（下の「既知の制限」参照）、音声認識を
+プラグインに内蔵しています。マイクは開かず、UNIT 01 のエフェクト前の音声だけを
+認識します。発話区間検出 → 16 kHz 変換 → whisper → 既存の多言語コマンド解析、の
+順に処理し、OBS の音声スレッドは一切止めません。
+
+- whisper.cpp v1.9.4 はコミット ID 固定、モデルは SHA-256 検証（`cmake/whisper.cmake`）。
+- Universal2 では arm64 / x86_64 を別々にビルドして結合します（x86_64 は AVX+F16C までに制限し、2013 年の Intel Mac でも動作）。
+- 回帰テスト `m600_test_whisper`（`-DMODEL600_WHISPER_TESTS=ON`）：合成音声の日本語・英語コマンドで、誤発火 0 件と認識率 70% 以上を確認します（`tests/data/voice/`）。
 
 The Layer 1/2 code carries no OBS dependency, so it recompiles unchanged for the
 planned Discord VC edition, a VST3 plugin and an iOS companion.
@@ -64,6 +81,8 @@ CI packages (GitHub Actions artifacts `model600-<OS>-<edition>`):
 OBS Studio 30+, Qt 6, a C++20 compiler (MSVC `/utf-8 /W4`, Apple Clang
 Universal2, or GCC/Clang on Linux), CMake 3.21+.
 
+Third-party components and their licences: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## Editions
 `-DMODEL600_PRO_EDITION=ON|OFF` physically includes or excludes the Pro code
 (UNIT 05 and the voice director) at compile time. Online activation is handled
@@ -75,5 +94,7 @@ network outage.
 ## 既知の制限 / Known limitations
 
 - 音声コマンド受理時の完了チャイム（モニター専用、-24 dB）は未実装です。OBSフィルタの出力は配信にも乗るため、モニターだけに鳴らすには別のモニター専用ソースが必要になります。
-- macOS の音声ディレクター: 音声認識の許可ダイアログ文言（`NSSpeechRecognitionUsageDescription`）はホストアプリ（OBS.app）の Info.plist から読まれますが、OBS 31.1.1 はこのキーを持っていません。キーが無いアプリで音声認識を要求すると macOS がプロセスを終了させるため、このキーが無い OBS では音声ディレクターを起動せず、OBS ログに警告を出して無効のままにします（他の機能は動作します）。
+- macOS で OS 標準の音声認識（Speech framework）を使わない理由：許可ダイアログの文言（`NSSpeechRecognitionUsageDescription`）はホストアプリ（OBS.app）の Info.plist から読まれますが、OBS 31.1.1 はこのキーを持っておらず、キーが無いアプリで音声認識を要求すると macOS がプロセスを終了させます。そのため内蔵の whisper.cpp を使います。
+- 内蔵エンジンの認識精度は、自動テストでは合成音声（Open JTalk / eSpeak NG）でしか確認していません。実際の声での精度、韓国語・中国語・インドネシア語の精度、Intel Mac での応答時間は未確認です。
+- whisper.cpp の取得とモデルのダウンロードはビルド時に行います（ネットワークが無い環境では `-DMODEL600_WHISPER_MODEL_PATH=<ggml-base-q5_1.bin>` を指定）。
 - ライセンス・保護・OS設定修復まわりの保留事項は [`docs/DEFERRED_NOTES.md`](docs/DEFERRED_NOTES.md) にまとめています。
