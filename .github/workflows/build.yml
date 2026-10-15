@@ -67,8 +67,8 @@ jobs:
         include:
           - { os: windows-2022, os_name: Windows MSVC, edition: pro }
           - { os: windows-2022, os_name: Windows MSVC, edition: standard }
-          - { os: macos-14, os_name: macOS Universal2, edition: pro }
-          - { os: macos-14, os_name: macOS Universal2, edition: standard }
+          - { os: macos-15, os_name: macOS Universal2, edition: pro }
+          - { os: macos-15, os_name: macOS Universal2, edition: standard }
     steps:
       - uses: actions/checkout@v4
 

@@ -94,7 +94,7 @@ QColor zone_off(const QString& z) {
 // Soft bloom around a lit shape: a wide translucent stroke under the fill.
 void glow_fill(QPainter& p, const QPainterPath& path, const QColor& c, double width) {
     QColor g = c;
-    g.setAlphaF(0.28);
+    g.setAlphaF(0.28f);
     p.strokePath(path, QPen(g, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     p.fillPath(path, c);
 }

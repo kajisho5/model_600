@@ -70,9 +70,9 @@ static void draw_led(QPainter& p, const QPointF& c, const QString& part_name, bo
         QColor glow = part_name == QLatin1String("led_red") ? Tok::red
                     : part_name == QLatin1String("led_green") ? Tok::green : Tok::accent;
         QRadialGradient g(c, size * 1.1);
-        glow.setAlphaF(0.35);
+        glow.setAlphaF(0.35f);
         g.setColorAt(0, glow);
-        glow.setAlphaF(0.0);
+        glow.setAlphaF(0.0f);
         g.setColorAt(1, glow);
         p.setPen(Qt::NoPen);
         p.setBrush(g);
@@ -434,7 +434,7 @@ void LedMeter::paintEvent(QPaintEvent*) {
         const qreal db = meter_db(frac);
         const bool lit_pk = frac <= pk, lit_rms = frac <= rm;
         QColor c = lit_pk ? zone_color(db) : Tok::off;
-        if (lit_pk && !lit_rms) c.setAlphaF(0.55);
+        if (lit_pk && !lit_rms) c.setAlphaF(0.55f);
         if (vertical) {
             const qreal y = b.bottom() - 2 - (i + 1) * pitch;
             p.fillRect(QRectF(b.left() + 2, y + 1, b.width() - 4, pitch - 1), Tok::off);
@@ -620,7 +620,7 @@ void StatusLine::paintEvent(QPaintEvent*) {
     else if (level_ == Level::Error) led = QStringLiteral("led_red");
     if (level_ == Level::Info) {
         QRadialGradient g(QPointF(20, height() / 2.0), 9);
-        QColor c = Tok::info; c.setAlphaF(0.3); g.setColorAt(0, c); c.setAlphaF(0); g.setColorAt(1, c);
+        QColor c = Tok::info; c.setAlphaF(0.3f); g.setColorAt(0, c); c.setAlphaF(0); g.setColorAt(1, c);
         p.setPen(Qt::NoPen); p.setBrush(g); p.drawEllipse(QPointF(20, height() / 2.0), 9, 9);
         p.setBrush(Tok::info); p.drawEllipse(QPointF(20, height() / 2.0), 3.5, 3.5);
     } else {
@@ -868,7 +868,7 @@ void HeaderBar::paintEvent(QPaintEvent*) {
             const QPointF c(x, 45);
             if (links_[i]) {
                 QRadialGradient g(c, 6);
-                QColor gc = Tok::green; gc.setAlphaF(0.3); g.setColorAt(0, gc); gc.setAlphaF(0); g.setColorAt(1, gc);
+                QColor gc = Tok::green; gc.setAlphaF(0.3f); g.setColorAt(0, gc); gc.setAlphaF(0); g.setColorAt(1, gc);
                 p.setPen(Qt::NoPen); p.setBrush(g); p.drawEllipse(c, 6, 6);
             }
             p.setPen(Qt::NoPen);

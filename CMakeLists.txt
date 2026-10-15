@@ -51,6 +51,8 @@ if(APPLE)
         set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
     endif()
     enable_language(OBJCXX)
+    # voice-command-mac.mm uses __weak captures, which require ARC.
+    set_source_files_properties(src/voice-command-mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
         set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
     endif()
@@ -185,7 +187,8 @@ endif()
 
 # --- Install (standard OBS plugin layout) ------------------------------------
 if(WIN32)
-    install(TARGETS model600 RUNTIME DESTINATION obs-plugins/64bit)
+    # A MODULE library is a LIBRARY artifact on every platform, .dll included.
+    install(TARGETS model600 LIBRARY DESTINATION obs-plugins/64bit)
 elseif(APPLE)
     install(TARGETS model600 LIBRARY DESTINATION "model600.plugin/Contents/MacOS")
 else()

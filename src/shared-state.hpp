@@ -88,6 +88,13 @@ inline std::int64_t now_us() noexcept {
     return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
+// The padding from alignas(128) is the point (one slot per cache-line pair), so
+// MSVC's "structure was padded due to alignment specifier" notice is silenced.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
 // -----------------------------------------------------------------------------
 //  Per-instance telemetry + control slot.
 //
@@ -208,6 +215,9 @@ struct BusLayout {
 };
 static_assert(sizeof(BusLayout) == kBusStructSize,
               "BusLayout must be exactly 4096 bytes (frozen ABI)");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 static_assert(offsetof(BusLayout, unit_slots) == 256,
               "unit_slots[] must start at the 256-byte boundary (frozen ABI)");
 
@@ -586,13 +596,13 @@ private:
     void maintenance_loop() noexcept {
         // ~1 ms cadence so the 0.5 ms attack follower stays well sampled.
         using namespace std::chrono;
-        auto last = steady_clock::now();
+        auto prev_tick = steady_clock::now();
         while (maint_running_.load(std::memory_order_acquire)) {
             std::this_thread::sleep_for(milliseconds(1));
             if (!view_) continue;
             const auto nowt = steady_clock::now();
-            const float dt = static_cast<float>(duration_cast<microseconds>(nowt - last).count()) * 1.0e-6f;
-            last = nowt;
+            const float dt = static_cast<float>(duration_cast<microseconds>(nowt - prev_tick).count()) * 1.0e-6f;
+            prev_tick = nowt;
             gc_and_decay();
             update_summing_guard(dt);
             beat(); // Keep our own slot fresh even when audio is paused.

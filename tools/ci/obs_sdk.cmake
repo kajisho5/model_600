@@ -75,12 +75,17 @@ set(args
     -DENABLE_FRONTEND=OFF
     -DENABLE_SCRIPTING=OFF
     -DOBS_VERSION_OVERRIDE=${OBS_VERSION}
-    "-DCMAKE_PREFIX_PATH=${OUT}/deps;${OUT}/qt6")
+    -C "${OUT}/init.cmake")
+# List-valued cache entries go through an initial-cache script: passed on the
+# command line, execute_process would split them at the ';'.
+set(init "set(CMAKE_PREFIX_PATH \"${OUT}/deps;${OUT}/qt6\" CACHE PATH \"\")\n")
 if(CMAKE_HOST_WIN32)
     list(APPEND args -G "Visual Studio 17 2022" -A x64)
 else()
-    list(APPEND args -G Xcode "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0)
+    string(APPEND init "set(CMAKE_OSX_ARCHITECTURES \"arm64;x86_64\" CACHE STRING \"\")\n")
+    list(APPEND args -G Xcode -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0)
 endif()
+file(WRITE "${OUT}/init.cmake" "${init}")
 
 function(run)
     execute_process(COMMAND ${ARGN} RESULT_VARIABLE rc)

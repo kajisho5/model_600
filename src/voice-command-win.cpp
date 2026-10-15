@@ -174,7 +174,7 @@ private:
                 CComPtr<ISpRecoResult> result = ev.RecoResult();
                 if (!result) continue;
                 CSpDynamicString text;
-                if (FAILED(result->GetText(SP_GETWHOLEPHRASE, SP_GETWHOLEPHRASE, TRUE, &text, nullptr))) continue;
+                if (FAILED(result->GetText(static_cast<ULONG>(SP_GETWHOLEPHRASE), static_cast<ULONG>(SP_GETWHOLEPHRASE), TRUE, &text, nullptr))) continue;
                 const int len = ::WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
                 if (len <= 1) continue;
                 std::vector<char> utf8(static_cast<std::size_t>(len));
