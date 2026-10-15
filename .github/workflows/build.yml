@@ -96,9 +96,14 @@ jobs:
         shell: bash
         run: |
           EXTRA=""
-          if [ "$RUNNER_OS" = "macOS" ]; then EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"; fi
+          PREFIX="$OBS_SDK/sdk;$OBS_SDK/deps;$OBS_SDK/qt6"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"
+            # libobs installs as sdk/Frameworks/libobs.framework on macOS.
+            PREFIX="$PREFIX;$OBS_SDK/sdk/Frameworks"
+          fi
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA \
-            "-DCMAKE_PREFIX_PATH=$OBS_SDK/sdk;$OBS_SDK/deps;$OBS_SDK/qt6" \
+            "-DCMAKE_PREFIX_PATH=$PREFIX" \
             -DMODEL600_BUILD_PLUGIN=ON \
             -DMODEL600_BUILD_PORTABLE_CHECK=ON \
             -DMODEL600_BUILD_TESTS=ON \
