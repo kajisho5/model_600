@@ -644,6 +644,9 @@ static void start_voice_bridge(FilterInstance* f) {
 #elif defined(__APPLE__)
     g_voice_bridge = m600_mac_voice_start(&f->engine.prefx_tap(), f->cached_rate,
                                           static_cast<int>(voice::Lang::AUTO), m600_apply_voice_command);
+    if (!g_voice_bridge)
+        blog(LOG_WARNING, "[MODEL 600] voice director unavailable: the OBS app bundle does not declare "
+                          "NSSpeechRecognitionUsageDescription, so macOS speech recognition cannot be used.");
 #endif
     if (g_voice_bridge) g_voice_bridge_owner = f;
 }

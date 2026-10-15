@@ -171,6 +171,11 @@ private:
 };
 
 extern "C" void* m600_mac_voice_start(void* tap, float rate, int lang, void (*cb)(const Command*)) {
+    // TCC reads the speech-recognition prompt from the host app (OBS.app), not
+    // from this plugin bundle. Without that key the Speech framework terminates
+    // the whole process on the first authorization request, so stay disabled.
+    NSString* why = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSSpeechRecognitionUsageDescription"];
+    if (![why isKindOfClass:[NSString class]] || why.length == 0) return nullptr;
     auto dispatch = [cb](const Command& c) { if (cb) cb(&c); };
     auto* bridge = new MacVoiceBridge(static_cast<dsp::PreFxTap*>(tap), rate, dispatch);
     bridge->set_language(static_cast<Lang>(lang));
