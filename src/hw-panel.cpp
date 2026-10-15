@@ -773,4 +773,75 @@ void Ladder::paintEvent(QPaintEvent*) {
     }
 }
 
+// =============================================================================
+//  MiniStrip
+// =============================================================================
+MiniStrip::MiniStrip(QWidget* parent) : QWidget(parent) {
+    setFixedHeight(76);
+    setAttribute(Qt::WA_OpaquePaintEvent, true);
+}
+
+void MiniStrip::set(double bar_db, double hold_db, const QVector<Readout>& readouts) {
+    if (std::abs(bar_db - bar_) < 0.05 && std::abs(hold_db - hold_) < 0.05 && readouts.size() == readouts_.size()) {
+        bool same = true;
+        for (int i = 0; i < readouts.size(); ++i)
+            same = same && readouts[i].value == readouts_[i].value && readouts[i].label == readouts_[i].label;
+        if (same) return;
+    }
+    bar_ = bar_db;
+    hold_ = hold_db;
+    readouts_ = readouts;
+    update();
+}
+
+void MiniStrip::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    smooth(p);
+    // Dark anodised strip with a bright top edge, like a 1U panel.
+    QLinearGradient g(0, 0, 0, height());
+    g.setColorAt(0, QColor(0x22, 0x24, 0x28));
+    g.setColorAt(1, QColor(0x14, 0x15, 0x18));
+    p.fillRect(rect(), g);
+    p.setPen(QPen(QColor(255, 255, 255, 30), 1));
+    p.drawLine(QPointF(0, 0.5), QPointF(width(), 0.5));
+
+    const double cell_w = 92.0;
+    const double right = width() - 24.0 - readouts_.size() * cell_w;
+    // Peak bar window.
+    const QRectF win(24, 14, std::max(120.0, right - 40.0), 30);
+    p.fillRect(win, Disp::bg);
+    const int n = 96;
+    const double pitch = (win.width() - 12) / n;
+    for (int i = 0; i < n; ++i) {
+        const double a = -60.0 + 60.0 * i / n, b = -60.0 + 60.0 * (i + 1) / n, c = (a + b) / 2.0;
+        const QString zone = c < -20 ? QStringLiteral("green") : (c < -9 ? QStringLiteral("amber") : QStringLiteral("red"));
+        const bool lit = c <= bar_ || (hold_ > -60.0 && a <= hold_ && hold_ < b);
+        const QRectF seg(win.x() + 6 + i * pitch + pitch * 0.15, win.y() + 7, pitch * 0.7, win.height() - 14);
+        p.fillRect(seg, lit ? zone_on(zone) : zone_off(zone));
+    }
+    p.setFont(make_font(9, QFont::Bold));
+    p.setPen(Disp::ink_dim);
+    struct Mark { double v; const char* s; };
+    static const Mark marks[] = {{-60, "-60"}, {-40, "-40"}, {-30, "-30"}, {-20, "-20"}, {-9, "-9"}, {0, "0 dBFS"}};
+    const QFontMetricsF fm(p.font());
+    for (const Mark& m : marks) {
+        const double x = win.x() + 6 + (m.v + 60.0) / 60.0 * (win.width() - 12);
+        const QString t = QString::fromLatin1(m.s);
+        const double w = fm.horizontalAdvance(t);
+        p.drawText(QPointF(m.v <= -60 ? x : (m.v >= 0 ? x - w : x - w / 2), win.bottom() + 14), t);
+    }
+    // Read-outs.
+    for (int i = 0; i < readouts_.size(); ++i) {
+        const double x = right + i * cell_w;
+        p.setFont(make_font(9, QFont::Bold, 1.2));
+        p.setPen(Disp::ink_dim);
+        p.drawText(QPointF(x + 6, 22), readouts_[i].label);
+        const QRectF w(x + 4, 28, cell_w - 12, 36);
+        p.fillRect(w, Disp::bg);
+        QString shown = readouts_[i].value;
+        while (seg_text_cells(shown) < 4) shown.prepend(QLatin1Char(' '));
+        draw_seg_text(p, shown, QPointF(w.x() + 4, w.y() + 5), (w.width() - 8) / 4.0, w.height() - 10, Disp::lit, Disp::ghost);
+    }
+}
+
 } // namespace sw::model600::ui::hw

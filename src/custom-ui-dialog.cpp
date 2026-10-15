@@ -119,33 +119,6 @@ private:
     qreal value_ = 0;
 };
 
-// Mini strip readouts: LABEL over value, fixed 66 px columns.
-class MiniValues : public QWidget {
-public:
-    explicit MiniValues(QWidget* parent = nullptr) : QWidget(parent) { setFixedHeight(44); }
-    void set(const QVector<std::pair<QString, QString>>& v) {
-        values_ = v;
-        setFixedWidth(66 * static_cast<int>(v.size()));
-        update();
-    }
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        for (int i = 0; i < values_.size(); ++i) {
-            const qreal x = i * 66.0;
-            p.setFont(font_label());
-            p.setPen(Tok::t2);
-            p.drawText(QRectF(x, 0, 66, 16), Qt::AlignLeft | Qt::AlignVCenter, values_[i].first);
-            p.setFont(make_font(15, QFont::Medium));
-            p.setPen(Tok::t1);
-            draw_tabular(p, QRectF(x, 18, 66, 24), values_[i].second, Qt::AlignLeft);
-        }
-    }
-private:
-    QVector<std::pair<QString, QString>> values_;
-};
-
 } // namespace
 
 // =============================================================================
@@ -468,6 +441,9 @@ void StudioConsole::Peak::feed(float db, qint64 now_ms, float dt_s) {
 
 StudioConsole::StudioConsole(dsp::Engine* engine, SharedBus* bus, bool director, bool pro, QWidget* parent)
     : QDialog(parent), engine_(engine), bus_(bus), director_(director && pro), pro_(pro) {
+#if !defined(MODEL600_PRO_EDITION)
+    director_ = false;   // The Standard binary has no UNIT 05.
+#endif
     install_fonts();
     setPalette(studio_palette());
     setFont(font_body());
@@ -516,7 +492,7 @@ void StudioConsole::build_ui() {
     root->setSpacing(0);
     build_panel();
     root->addWidget(panel_);
-    mini_bar_ = build_mini_bar();
+    mini_bar_ = new hw::MiniStrip(this);
     mini_bar_->setVisible(false);
     root->addWidget(mini_bar_);
     setFixedSize(panel_->sizeHint());
@@ -721,22 +697,6 @@ void StudioConsole::build_panel() {
                              lk.value(QStringLiteral("dx")).toDouble(), panel_);
 }
 
-QWidget* StudioConsole::build_mini_bar() {
-    auto* bar = new QWidget(this);
-    auto* h = new QHBoxLayout(bar);
-    h->setContentsMargins(24, 13, 24, 8);
-    h->setSpacing(30);
-    mini_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Horizontal, bar);
-    mini_meter_->set_scale_visible(true);
-    mini_meter_->setFixedHeight(32);
-    h->addWidget(mini_meter_, 1, Qt::AlignTop);
-    auto* values = new MiniValues(bar);
-    mini_values_ = values;
-    h->addWidget(values, 0, Qt::AlignTop);
-    bar->setFixedHeight(75);
-    return bar;
-}
-
 void StudioConsole::sync_from_params() {
     auto& p = engine_->params();
     for (auto it = knobs_.begin(); it != knobs_.end(); ++it) {
@@ -938,6 +898,7 @@ void StudioConsole::refresh_unit(qint64 now, float dt) {
     if (auto* b = buttons_.value(QStringLiteral("cough"))) b->set_lit(engine_->cough().active());
 }
 
+#if defined(MODEL600_PRO_EDITION)
 void StudioConsole::refresh_director(qint64 now, float dt) {
     const auto& t = engine_->telemetry();
     Peak& master = peaks_[4];
@@ -988,6 +949,7 @@ void StudioConsole::refresh_director(qint64 now, float dt) {
     if (auto* b = buttons_.value(QStringLiteral("chapter"))) b->set_lit(now < flash_chapter_until_);
     if (auto* b = buttons_.value(QStringLiteral("report"))) b->set_lit(now < flash_report_until_);
 }
+#endif
 
 void StudioConsole::refresh() {
     const qint64 now = clock_.elapsed();
@@ -995,18 +957,22 @@ void StudioConsole::refresh() {
     last_ms_ = now;
     sync_from_params();
     refresh_links();
+#if defined(MODEL600_PRO_EDITION)
     if (director_) refresh_director(now, dt);
     else refresh_unit(now, dt);
+#else
+    refresh_unit(now, dt);
+#endif
     update_status();
     if (mini_) {
         const auto& t = engine_->telemetry();
-        const float sp = t.sample_peak_db.load();
-        mini_meter_->set_level(sp, t.rms_db.load(), t.peak_hold_db.load());
-        auto* mv = static_cast<MiniValues*>(mini_values_);
-        if (director_) mv->set({{QStringLiteral("M"), fmt_db(t.lufs_m.load())}, {QStringLiteral("S"), fmt_db(t.lufs_s.load())},
-                                {QStringLiteral("I"), fmt_db(t.lufs_i.load())}, {QStringLiteral("PK"), fmt_db(peaks_[4].hold)}});
-        else mv->set({{QStringLiteral("PK"), fmt_db(peaks_[0].hold)}, {QStringLiteral("S"), fmt_db(t.lufs_s.load())},
-                      {QStringLiteral("GR"), fmt_db(t.gr_db.load())}});
+        const Peak& pk = peaks_[director_ ? 4 : 0];
+        if (director_)
+            mini_bar_->set(pk.bar, pk.hold, {{QStringLiteral("PEAK"), seg_db(pk.hold)}, {QStringLiteral("S LUFS"), seg_db(t.lufs_s.load())},
+                                             {QStringLiteral("I LUFS"), seg_db(t.lufs_i.load())}});
+        else
+            mini_bar_->set(pk.bar, pk.hold, {{QStringLiteral("PEAK"), seg_db(pk.hold)}, {QStringLiteral("S LUFS"), seg_db(t.lufs_s.load())},
+                                             {QStringLiteral("GR dB"), seg_db(t.gr_db.load())}});
     }
 }
 

@@ -28,7 +28,10 @@ planned Discord VC edition, a VST3 plugin and an iOS companion.
 
 ## GUI
 
-全画面のサンプル画像は [`docs/gui-samples/`](docs/gui-samples/README.md) にあります（実装コードを直接描画したもの）。デザイン仕様は [`docs/design/`](docs/design/DESIGN_SPEC.md)、立体部品は Blender スクリプト [`tools/blender/render_parts.py`](tools/blender/render_parts.py) で生成しています。
+全画面のサンプル画像は [`docs/gui-samples/`](docs/gui-samples/README.md) にあります。実装コードを直接描画したものです。
+
+- **デザイン仕様**：GUI v2「実機ハードウェア」の仕様は [`docs/design/v2/DESIGN_V2.md`](docs/design/v2/DESIGN_V2.md) にあります。
+- **パネルと部品**：[`docs/design/v2/render_hardware.py`](docs/design/v2/render_hardware.py)（Blender）で書き出し、[`pack_assets.py`](docs/design/v2/pack_assets.py) で `resources/hw/` にまとめています。
 
 ## Build
 

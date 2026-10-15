@@ -45,6 +45,7 @@ class Lamp;
 class DigitalMeter;
 class Ladder;
 class SegDisplay;
+class MiniStrip;
 } // namespace hw
 
 class HeaderBar;
@@ -171,11 +172,13 @@ private:
 
     void build_ui();
     void build_panel();
-    QWidget* build_mini_bar();
+
     std::atomic<float>* param_for(const QString& knob_id) const;
     void sync_from_params();
     void refresh_unit(qint64 now_ms, float dt);
-    void refresh_director(qint64 now_ms, float dt);
+#if defined(MODEL600_PRO_EDITION)
+    void refresh_director(qint64 now_ms, float dt);   // UNIT 05 is compiled into the Pro binary only.
+#endif
     void refresh_links();
     void show_menu(const QPoint& global);
     void relabel();
@@ -212,9 +215,7 @@ private:
     qint64 flash_chapter_until_ = 0, flash_report_until_ = 0;
 
     // Compact strip.
-    QWidget* mini_bar_ = nullptr;
-    LedMeter* mini_meter_ = nullptr;
-    QWidget* mini_values_ = nullptr;
+    hw::MiniStrip* mini_bar_ = nullptr;
 };
 
 // Golden zone for YouTube Live: -12.0 +/- 1.5 LUFS integrated.

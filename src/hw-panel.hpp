@@ -319,6 +319,23 @@ private:
     int lit_ = 0;
 };
 
+// -----------------------------------------------------------------------------
+//  Compact strip: one long peak bar (dBFS, OBS zones) and up to four
+//  7-segment read-outs. Shown instead of the faceplate in compact view.
+// -----------------------------------------------------------------------------
+class MiniStrip : public QWidget {
+    Q_OBJECT
+public:
+    explicit MiniStrip(QWidget* parent = nullptr);
+    struct Readout { QString label, value; };
+    void set(double bar_db, double hold_db, const QVector<Readout>& readouts);
+protected:
+    void paintEvent(QPaintEvent*) override;
+private:
+    double bar_ = -120, hold_ = -120;
+    QVector<Readout> readouts_;
+};
+
 } // namespace sw::model600::ui::hw
 
 #endif // SEVENTHWELL_MODEL600_HW_PANEL_HPP

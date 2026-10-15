@@ -71,6 +71,11 @@ def reset(samples):
     sc.cycles.max_bounces = 8
     sc.cycles.glossy_bounces = 4
     sc.cycles.transmission_bounces = 6
+    # No caustics: chrome parts would otherwise splash noisy light onto the
+    # plate (most visible above the toggle levers). Glossy filter for the same.
+    sc.cycles.caustics_reflective = False
+    sc.cycles.caustics_refractive = False
+    sc.cycles.blur_glossy = 1.0
     sc.render.image_settings.file_format = "PNG"
     sc.render.image_settings.color_mode = "RGBA"
     sc.view_settings.view_transform = "AgX"
@@ -865,7 +870,10 @@ def build_static(num):
         ladder_frame(L, 0.0)
     for t in u["toggles"]:
         toggle_base(t["cx"], t["cy"], 0.0)
-        hide_from_camera(created(toggle_lever, t["cx"], t["cy"], t["on"], t.get("horizontal", False), 0.0))
+        lever = created(toggle_lever, t["cx"], t["cy"], t["on"], t.get("horizontal", False), 0.0)
+        hide_from_camera(lever)
+        for o in lever:   # The bright chrome ball would sparkle in the brushed plate.
+            o.visible_glossy = False
     for b in u["buttons"]:
         button_bezel(b["cx"], b["cy"], b["w"], b["h"], 0.0)
         hide_from_camera(created(button_cap, b["cx"], b["cy"], b["w"], b["h"], b["color"], False, 0.0))

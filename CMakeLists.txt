@@ -200,6 +200,8 @@ if(MODEL600_BUILD_GUI_SAMPLES)
         src/ui-widgets.cpp
         src/ui-widgets.hpp)
     target_include_directories(m600_render_gui_samples PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    # The renderer documents every screen, UNIT 05 included.
+    target_compile_definitions(m600_render_gui_samples PRIVATE MODEL600_PRO_EDITION=1)
     qt_add_resources(m600_render_gui_samples "m600_ui_samples" PREFIX "/m600" BASE "resources"
                      FILES ${MODEL600_UI_RESOURCES})
     find_package(Threads REQUIRED)
