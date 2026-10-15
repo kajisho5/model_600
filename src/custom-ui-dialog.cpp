@@ -3,16 +3,21 @@
 //  custom-ui-dialog.cpp  [Layer 2]  Studio console, UNIT 05 mixer, calibration.
 // =============================================================================
 #include "custom-ui-dialog.hpp"
+#include "hw-panel.hpp"
 #include "ui-theme.hpp"
 #include "ui-widgets.hpp"
 
+#include <QContextMenuEvent>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHideEvent>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
 #include <QScreen>
@@ -31,7 +36,6 @@ namespace sw::model600::ui {
 
 namespace {
 
-constexpr int kEar = 18;   // Rack ear width (px).
 
 // Palette so native children (message boxes, menus) match the console.
 QPalette studio_palette() {
@@ -142,109 +146,7 @@ private:
     QVector<std::pair<QString, QString>> values_;
 };
 
-QString fmt_unit(float v, const QString& unit) {
-    return fmt_signed(v) + QStringLiteral(" ") + unit;
-}
-
 } // namespace
-
-// =============================================================================
-//  ChannelStrip
-// =============================================================================
-ChannelStrip::ChannelStrip(Mode mode, const QString& number, const QString& name, QWidget* parent)
-    : QWidget(parent), mode_(mode), number_(number), name_(name) {
-    setFixedWidth(168);
-    auto* v = new QVBoxLayout(this);
-    v->setContentsMargins(12, 40, 12, 44);
-    v->setSpacing(6);
-
-    auto* labels = new QHBoxLayout();
-    labels->setSpacing(8);
-    auto* pk = new SectionLabel(QStringLiteral("PK"), this);
-    pk->setFixedWidth(44);
-    labels->addWidget(pk);
-    labels->addWidget(new SectionLabel(QStringLiteral("DUCK"), this));
-    labels->addStretch(1);
-    v->addLayout(labels);
-
-    auto* boxes = new QHBoxLayout();
-    boxes->setSpacing(8);
-    pk_box_ = new ValueBox(this);
-    pk_box_->setFixedWidth(44);
-    duck_box_ = new ValueBox(this);
-    duck_box_->setFixedWidth(44);
-    boxes->addWidget(pk_box_);
-    boxes->addWidget(duck_box_);
-    boxes->addStretch(1);
-    v->addLayout(boxes);
-    v->addSpacing(4);
-
-    auto* meters = new QHBoxLayout();
-    meters->setSpacing(3);
-    level_ = new LedMeter(LedMeter::Kind::Level, Qt::Vertical, this);
-    level_->setFixedWidth(16);
-    duck_ = new LedMeter(LedMeter::Kind::GainReduction, Qt::Vertical, this);
-    duck_->setFixedWidth(8);
-    meters->addWidget(level_);
-    meters->addWidget(duck_);
-    meters->addWidget(new MeterScale(MeterScale::Kind::Level, this));
-    meters->addStretch(1);
-    fader_ = new RackFader(Qt::Vertical, -48.0f, 12.0f, RackFader::Law::Console, this);
-    fader_->setFixedWidth(62);
-    meters->addWidget(fader_);
-    v->addLayout(meters, 1);
-
-    auto* fv = new QHBoxLayout();
-    fv->addStretch(1);
-    fader_box_ = new ValueBox(this);
-    fader_box_->setFixedWidth(52);
-    fader_box_->set_text(QStringLiteral("0.0 dB"));
-    fv->addWidget(fader_box_);
-    v->addLayout(fv);
-
-    connect(pk_box_, &ValueBox::clicked, this, [this] { hold_ = -120.0f; level_->reset_hold(); });
-    connect(fader_, &RackFader::dbChanged, this, [this](float db) {
-        fader_box_->set_text(fmt_signed(db) + QStringLiteral(" dB"));
-        emit trimMoved(mode_, db);
-    });
-}
-
-void ChannelStrip::update_from(float true_peak, float rms, float st_lufs, float gr, float duck, bool live) {
-    live_ = live;
-    st_lufs_ = st_lufs;
-    hold_ = std::max(hold_, true_peak);
-    level_->set_level(true_peak, rms, hold_);
-    duck_->set_gr(std::min(gr, duck));
-    pk_box_->set_text(fmt_db(hold_), hold_ > -1.0f ? Tok::red : QColor());
-    duck_box_->set_text(fmt_db(duck));
-    update();
-}
-
-void ChannelStrip::paintEvent(QPaintEvent*) {
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(QPen(Tok::line, 1));
-    p.setBrush(Tok::panel);
-    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6);
-    const QRectF badge(12.5, 12.5, 21, 17);
-    p.setPen(QPen(live_ ? Tok::accent : Tok::line_strong, 1));
-    p.setBrush(Qt::NoBrush);
-    p.drawRoundedRect(badge, 3, 3);
-    p.setFont(make_font(10, QFont::DemiBold));
-    p.drawText(badge, Qt::AlignCenter, number_);
-    p.setFont(make_font(11, QFont::DemiBold, 1.2));
-    p.setPen(live_ ? Tok::t1 : Tok::t3);
-    p.drawText(QPointF(42, 25.5), name_);
-    // Bottom: short-term loudness.
-    p.setPen(QPen(Tok::line, 1));
-    p.drawLine(QPointF(12, height() - 42.5), QPointF(width() - 12, height() - 42.5));
-    p.setFont(font_label());
-    p.setPen(Tok::t2);
-    p.drawText(QRectF(12, height() - 34, 80, 20), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("S-LUFS"));
-    p.setFont(make_font(14, QFont::Medium));
-    p.setPen(live_ ? Tok::t1 : Tok::t3);
-    draw_tabular(p, QRectF(12, height() - 36, width() - 24, 24), fmt_db(st_lufs_), Qt::AlignRight);
-}
 
 // =============================================================================
 //  CalibrationDialog
@@ -523,8 +425,47 @@ void CalibrationDialog::paintEvent(QPaintEvent*) {
 }
 
 // =============================================================================
-//  StudioConsole
+//  StudioConsole (GUI v2: hardware faceplates, docs/design/v2/DESIGN_V2.md)
 // =============================================================================
+namespace {
+
+const char* const kDownloadUrl = "https://www.seventhwell.com/model600/download";
+
+QPointF centre_of(const QJsonObject& o) {
+    return {o.value(QStringLiteral("cx")).toDouble(), o.value(QStringLiteral("cy")).toDouble()};
+}
+
+QJsonArray items(const QJsonObject& layout, const char* key) { return layout.value(QLatin1String(key)).toArray(); }
+
+// Number for a 7-segment field: one decimal, "----" for silence.
+QString seg_db(float db) {
+    if (!(db > -99.0f)) return QStringLiteral("----");
+    if (std::abs(db) < 0.05f) return QStringLiteral("0.0");
+    return QString::number(static_cast<double>(db), 'f', 1);
+}
+
+QString lufs_text(float lufs) {
+    return lufs > -99.0f ? QString::number(static_cast<double>(lufs), 'f', 1) : QStringLiteral("--");
+}
+
+double knob_default(const QString& id) {
+    if (id == QLatin1String("target")) return -14.5;
+    if (id == QLatin1String("duck")) return -3.5;
+    if (id == QLatin1String("ceiling")) return -6.0;
+    if (id == QLatin1String("scoop")) return -5.0;
+    if (id == QLatin1String("pocket")) return -8.5;
+    return 0.0;   // input / output.
+}
+
+} // namespace
+
+void StudioConsole::Peak::feed(float db, qint64 now_ms, float dt_s) {
+    if (!(db > -120.0f)) db = -120.0f;
+    bar = std::max(db, bar - 20.0f * dt_s);
+    if (db >= hold) { hold = db; hold_ms = now_ms; }
+    else if (now_ms - hold_ms > 1500) hold = std::max(bar, hold - 20.0f * dt_s);
+}
+
 StudioConsole::StudioConsole(dsp::Engine* engine, SharedBus* bus, bool director, bool pro, QWidget* parent)
     : QDialog(parent), engine_(engine), bus_(bus), director_(director && pro), pro_(pro) {
     install_fonts();
@@ -533,12 +474,10 @@ StudioConsole::StudioConsole(dsp::Engine* engine, SharedBus* bus, bool director,
     setWindowTitle(QStringLiteral("MODEL 600  -  %1 %2").arg(unit_number(), unit_name()));
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     build_ui();
+    clock_.start();
     timer_ = new QTimer(this);
     timer_->setInterval(33);   // ~30 fps, only while visible.
     connect(timer_, &QTimer::timeout, this, &StudioConsole::refresh);
-    if (director_) { setMinimumSize(1080, 120); resize(1120, 560); }
-    else           { setMinimumSize(540, 120); resize(560, 560); }
-    setMaximumHeight(560);
 }
 
 StudioConsole::~StudioConsole() = default;
@@ -565,347 +504,227 @@ QString StudioConsole::unit_name() const {
     }
 }
 
+QString StudioConsole::tr2(const char* en, const char* ja) const {
+    return lang_ == UiLang::JA ? QString::fromUtf8(ja) : QString::fromUtf8(en);
+}
+
 void StudioConsole::changed() { if (on_params_changed) on_params_changed(); }
 
 void StudioConsole::build_ui() {
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(kEar, 0, kEar, 0);
+    root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
-
-    header_ = new HeaderBar(this);
-    header_->set_unit(unit_number(), unit_name());
-    root->addWidget(header_);
-    connect(header_->pin_key(), &RackKey::toggled, this, &StudioConsole::toggle_pin);
-    connect(header_->fold_key(), &RackKey::toggled, this, &StudioConsole::toggle_mini);
-    connect(header_->reset_key(), &RackKey::clicked, this, &StudioConsole::panic_reset);
-    connect(header_->lang(), &SegmentedControl::currentChanged, this,
-            [this](int i) { set_language(i == 0 ? UiLang::JA : UiLang::EN); });
-    connect(header_, &HeaderBar::updateClicked, this, [] {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.seventhwell.com/model600/download")));
-    });
-
-    body_ = director_ ? build_director_body() : build_unit_body();
-    root->addWidget(body_, 1);
+    build_panel();
+    root->addWidget(panel_);
     mini_bar_ = build_mini_bar();
     mini_bar_->setVisible(false);
     root->addWidget(mini_bar_);
+    setFixedSize(panel_->sizeHint());
+    connect(panel_, &hw::Panel::contextRequested, this, &StudioConsole::show_menu);
+    connect(panel_, &hw::Panel::statusClicked, this, [this] {
+        if (!update_version_.isEmpty()) QDesktopServices::openUrl(QUrl(QString::fromLatin1(kDownloadUrl)));
+    });
+    relabel();
+    sync_from_params();
+}
 
-    status_ = new StatusLine(this);
-    if (director_) {
-        connect(status_, &StatusLine::linkClicked, this, [this] {
-            QMenu menu(this);
-            menu.setPalette(studio_palette());
-            menu.setFont(font_body());
-            QAction* deact = menu.addAction(lang_ == UiLang::JA ? QStringLiteral("このPCの認証を解除…")
-                                                                : QStringLiteral("Deactivate this PC..."));
-            if (menu.exec(QCursor::pos()) != deact) return;
-            const auto answer = QMessageBox::question(this, QStringLiteral("MODEL 600"),
-                lang_ == UiLang::JA ? QStringLiteral("このPCのライセンス認証を解除しますか？\n別のPCで使うときに行います。")
-                                    : QStringLiteral("Deactivate the licence on this PC?\nDo this before moving to another PC."));
-            if (answer == QMessageBox::Yes && on_deactivate_pc) on_deactivate_pc();
+std::atomic<float>* StudioConsole::param_for(const QString& id) const {
+    auto& p = engine_->params();
+    if (id == QLatin1String("input")) return &p.input_gain_db;
+    if (id == QLatin1String("output")) return &p.output_trim_db;
+    if (id == QLatin1String("target")) return &p.collab_target_lufs;
+    if (id == QLatin1String("duck")) return &p.collab_duck_db;
+    if (id == QLatin1String("ceiling")) return &p.game_ceiling_db;
+    if (id == QLatin1String("scoop")) return &p.game_scoop_db;
+    if (id == QLatin1String("pocket")) return &p.bgm_pocket_db;
+    return nullptr;
+}
+
+void StudioConsole::build_panel() {
+    panel_ = new hw::Panel(unit_number(), this);
+    const QJsonObject& L = panel_->layout();
+
+    // Continuous knobs.
+    for (const QJsonValue v : items(L, "knobs_big")) {
+        const QJsonObject k = v.toObject();
+        const QString id = k.value(QStringLiteral("id")).toString();
+        const double r = k.value(QStringLiteral("r")).toDouble();
+        auto* knob = new hw::Knob(r >= 50 ? QStringLiteral("knob_big") : QStringLiteral("knob_mid"), centre_of(k), r,
+                                  k.value(QStringLiteral("min")).toDouble(), k.value(QStringLiteral("max")).toDouble(),
+                                  knob_default(id), panel_);
+        const QString unit = k.value(QStringLiteral("unit")).toString();
+        knob->set_step(0.5);
+        knob->set_formatter([unit](double d) {
+            return (unit == QLatin1String("LUFS") ? QString::number(d, 'f', 1) : fmt_signed(static_cast<float>(d)))
+                   + QStringLiteral(" ") + unit;
+        });
+        knob->setObjectName(QStringLiteral("knob_") + id);
+        knobs_.insert(id, knob);
+        connect(knob, &hw::Knob::valueChanged, this, [this, id](double d) {
+            if (auto* p = param_for(id)) p->store(static_cast<float>(d));
+        });
+        connect(knob, &hw::Knob::released, this, &StudioConsole::changed);
+    }
+
+    // Stepped selectors.
+    for (const QJsonValue v : items(L, "knobs_step")) {
+        const QJsonObject k = v.toObject();
+        const QString id = k.value(QStringLiteral("id")).toString();
+        const QJsonArray pos = k.value(QStringLiteral("positions")).toArray();
+        const double spread = k.value(QStringLiteral("spread")).toDouble();
+        QVector<double> angles;
+        QStringList names;
+        const int n = static_cast<int>(pos.size());
+        for (int i = 0; i < n; ++i) {
+            angles.push_back(n > 1 ? -spread + 2.0 * spread * i / (n - 1) : 0.0);
+            names.push_back(pos.at(i).toString());
+        }
+        auto* sel = new hw::Selector(centre_of(k), k.value(QStringLiteral("r")).toDouble(), angles, names, panel_);
+        sel->setObjectName(QStringLiteral("selector_") + id);
+        selectors_.insert(id, sel);
+        connect(sel, &hw::Selector::indexChanged, this, [this, id](int i) {
+            auto& p = engine_->params();
+            if (id == QLatin1String("character")) p.character.store(i);
+            else if (id == QLatin1String("space")) p.space_fx.store(i);
+            else if (id == QLatin1String("scene")) {
+                p.apply_scene(i);
+                if (on_scene_macro) on_scene_macro(i);
+            }
+            changed();
         });
     }
-    root->addWidget(status_);
-    relabel();
-}
 
-QWidget* StudioConsole::build_param_row(QWidget* parent, RackFader*& fader, ValueBox*& box, float lo, float hi,
-                                        const QVector<float>& marks, float value, const QString& unit) {
-    auto* row = new QWidget(parent);
-    auto* h = new QHBoxLayout(row);
-    h->setContentsMargins(0, 0, 0, 0);
-    h->setSpacing(12);
-    fader = new RackFader(Qt::Horizontal, lo, hi, RackFader::Law::Linear, row);
-    fader->set_marks(marks);
-    fader->set_default_db(value);
-    fader->set_db(value);
-    box = new ValueBox(row);
-    box->setFixedWidth(84);
-    box->set_text(fmt_unit(value, unit));
-    h->addWidget(fader, 1);
-    h->addWidget(box, 0, Qt::AlignTop);
-    return row;
-}
-
-QWidget* StudioConsole::build_trim_row(QWidget* parent) {
-    QWidget* row = build_param_row(parent, trim_, trim_box_, -24.0f, 24.0f, {-24, -12, 0, 12, 24},
-                                   engine_->params().output_trim_db.load(), QStringLiteral("dB"));
-    trim_->set_default_db(0.0f);
-    connect(trim_, &RackFader::dbChanged, this, [this](float db) {
-        engine_->params().output_trim_db.store(db);
-        if (bus_) bus_->push_trim(engine_->mode(), db);
-        trim_box_->set_text(fmt_unit(db, QStringLiteral("dB")));
-        changed();
-    });
-    return row;
-}
-
-QWidget* StudioConsole::build_unit_body() {
-    auto& prm = engine_->params();
-    const Mode mode = engine_->mode();
-    auto* body = new QWidget(this);
-    auto* h = new QHBoxLayout(body);
-    h->setContentsMargins(16, 16, 16, 10);
-    h->setSpacing(18);
-
-    // ---- Left: output + GR meters with scales -------------------------------
-    auto* left = new QVBoxLayout();
-    left->setSpacing(6);
-    left->addWidget(new SectionLabel(QStringLiteral("OUTPUT"), body));
-    auto* boxes = new QHBoxLayout();
-    pk_box_ = new ValueBox(body);
-    pk_box_->setFixedWidth(42);
-    gr_box_ = new ValueBox(body);
-    gr_box_->setFixedWidth(38);
-    boxes->addWidget(pk_box_);
-    boxes->addStretch(1);
-    boxes->addWidget(gr_box_);
-    left->addLayout(boxes);
-    left->addSpacing(2);
-    auto* meters = new QHBoxLayout();
-    meters->setSpacing(4);
-    auto col = [&](QWidget* w, int stretch_top, const QString& caption, int stretch_bottom) {
-        auto* v = new QVBoxLayout();
-        v->setSpacing(4);
-        v->addWidget(w, stretch_top);
-        auto* cap = new SectionLabel(caption, body);
-        cap->set_centered(true);
-        cap->setMinimumWidth(20);
-        v->addWidget(cap);
-        if (stretch_bottom > 0) v->addStretch(stretch_bottom);
-        return v;
-    };
-    out_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Vertical, body);
-    out_meter_->setFixedWidth(22);
-    gr_meter_ = new LedMeter(LedMeter::Kind::GainReduction, Qt::Vertical, body);
-    gr_meter_->setFixedWidth(14);
-    meters->addLayout(col(out_meter_, 1, QStringLiteral("PK"), 0));
-    meters->addLayout(col(new MeterScale(MeterScale::Kind::Level, body), 1, QString(), 0));
-    meters->addLayout(col(gr_meter_, 42, QStringLiteral("GR"), 58));
-    meters->addLayout(col(new MeterScale(MeterScale::Kind::GainReduction, body), 42, QString(), 58));
-    left->addLayout(meters, 1);
-    connect(pk_box_, &ValueBox::clicked, this, [this] { engine_->telemetry().reset_holds(); out_meter_->reset_hold(); });
-    connect(out_meter_, &LedMeter::clicked, this, [this] { engine_->telemetry().reset_holds(); });
-    auto* left_w = new QWidget(body);
-    left_w->setLayout(left);
-    left_w->setFixedWidth(116);
-    h->addWidget(left_w);
-
-    // ---- Right: readouts + unit-specific controls + trim ------------------------
-    auto* right = new QVBoxLayout();
-    right->setSpacing(6);
-    auto* ro = new QHBoxLayout();
-    ro->setSpacing(8);
-    const QString fourth = mode == MODE_VOICE ? QStringLiteral("INPUT GAIN") : QStringLiteral("DUCK");
-    const QString labels[4] = {QStringLiteral("TRUE PEAK"), QStringLiteral("SHORT-TERM"), QStringLiteral("INTEGRATED"), fourth};
-    const QString units[4] = {QStringLiteral("dBTP"), QStringLiteral("LUFS"), QStringLiteral("LUFS"), QStringLiteral("dB")};
-    for (int i = 0; i < 4; ++i) {
-        readouts_[static_cast<std::size_t>(i)] = new Readout(labels[i], units[i], false, body);
-        ro->addWidget(readouts_[static_cast<std::size_t>(i)], 1);
+    // UNIT 05 channel trims, pushed to UNITs 01-04 over the shared bus.
+    int ch = 0;
+    for (const QJsonValue v : items(L, "knobs_trim")) {
+        const QJsonObject k = v.toObject();
+        auto* t = new hw::Knob(QStringLiteral("knob_trim"), centre_of(k), k.value(QStringLiteral("r")).toDouble(),
+                               k.value(QStringLiteral("min")).toDouble(), k.value(QStringLiteral("max")).toDouble(), 0.0,
+                               panel_);
+        t->set_step(0.5);
+        t->set_formatter([](double d) { return fmt_signed(static_cast<float>(d)) + QStringLiteral(" dB"); });
+        const Mode m = static_cast<Mode>(ch);
+        connect(t, &hw::Knob::valueChanged, this, [this, m](double d) {
+            if (bus_) bus_->push_trim(m, static_cast<float>(d));
+        });
+        trims_.push_back(t);
+        ++ch;
     }
-    right->addLayout(ro);
-    right->addSpacing(14);
 
-    auto section = [&](int idx, const QString& text) {
-        section_[static_cast<std::size_t>(idx)] = new SectionLabel(text, body);
-        right->addWidget(section_[static_cast<std::size_t>(idx)]);
-    };
-    auto key_row = [&](RackKey* a, RackKey* b, int height) {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(8);
-        a->setFixedHeight(height);
-        b->setFixedHeight(height);
-        row->addWidget(a, 1);
-        row->addWidget(b, 1);
-        right->addLayout(row);
-    };
+    // Toggle switches.
+    for (const QJsonValue v : items(L, "toggles")) {
+        const QJsonObject t = v.toObject();
+        const QString id = t.value(QStringLiteral("id")).toString();
+        auto* tg = new hw::Toggle(centre_of(t), t.value(QStringLiteral("horizontal")).toBool(), panel_);
+        tg->setObjectName(QStringLiteral("toggle_") + id);
+        toggles_.insert(id, tg);
+        connect(tg, &QAbstractButton::clicked, this, [this, id](bool on) {
+            auto& p = engine_->params();
+            if (id == QLatin1String("mono")) p.auto_mono.store(on ? 1 : 0);
+            else if (id == QLatin1String("latency")) p.zero_latency.store(on ? 0 : 1);   // Up = 1.5 ms look-ahead.
+            else if (id == QLatin1String("safe")) p.bgm_safe_mode.store(on ? 1 : 0);
+            else if (id == QLatin1String("swell")) p.bgm_auto_swell.store(on ? 1 : 0);
+            if (id != QLatin1String("meter")) changed();   // OUT / GR only switches the display.
+            refresh();
+        });
+    }
 
-    switch (mode) {
-        case MODE_VOICE: {
-            section(0, QStringLiteral("CHARACTER"));
-            character_ = new SegmentedControl({QStringLiteral("SOFT / ASMR"), QStringLiteral("BROADCAST"), QStringLiteral("FPS / LOUD")}, body);
-            character_->setFixedHeight(30);
-            character_->set_current(prm.character.load());
-            connect(character_, &SegmentedControl::currentChanged, this, [this](int i) { engine_->params().character.store(i); changed(); });
-            right->addWidget(character_);
-            right->addSpacing(12);
-            section(1, QStringLiteral("SPACE FX"));
-            space_fx_ = new SegmentedControl({QStringLiteral("DRY"), QStringLiteral("KARAOKE"), QStringLiteral("BATH"),
-                                              QStringLiteral("HALL"), QStringLiteral("CAVE"), QStringLiteral("RADIO")}, body);
-            space_fx_->set_text_px(10);
-            space_fx_->setFixedHeight(30);
-            space_fx_->set_current(prm.space_fx.load());
-            connect(space_fx_, &SegmentedControl::currentChanged, this, [this](int i) { engine_->params().space_fx.store(i); changed(); });
-            right->addWidget(space_fx_);
-            right->addSpacing(12);
-            section(2, QStringLiteral("CALIBRATION / MONITOR"));
-            calib_key_ = new RackKey(QString(), body);
-            audition_key_ = new RackKey(QString(), body);
-            audition_key_->set_led(QStringLiteral("led_amber"));
-            audition_key_->setCheckable(true);
-            connect(calib_key_, &RackKey::clicked, this, &StudioConsole::run_calibration);
-            connect(audition_key_, &RackKey::clicked, this, &StudioConsole::toggle_audition);
-            key_row(calib_key_, audition_key_, 34);
-            right->addSpacing(12);
-            section(3, QStringLiteral("EMERGENCY"));
-            bleep_key_ = new RackKey(QString(), body);
-            bleep_key_->set_style(RackKey::Style::Danger);
-            bleep_key_->set_led(QStringLiteral("led_red"));
-            cough_key_ = new RackKey(QString(), body);
-            cough_key_->set_led(QStringLiteral("led_amber"));
-            connect(bleep_key_, &RackKey::pressed, this, [this] { engine_->bleep().trigger(3.0f); });
-            connect(bleep_key_, &RackKey::released, this, [this] { engine_->bleep().stop(); });
-            connect(cough_key_, &RackKey::pressed, this, [this] { engine_->cough().press(true); });
-            connect(cough_key_, &RackKey::released, this, [this] { engine_->cough().release(); });
-            key_row(bleep_key_, cough_key_, 40);
-            break;
+    // Illuminated push buttons.
+    for (const QJsonValue v : items(L, "buttons")) {
+        const QJsonObject b = v.toObject();
+        const QString id = b.value(QStringLiteral("id")).toString();
+        auto* btn = new hw::Button(centre_of(b), b.value(QStringLiteral("w")).toInt(), b.value(QStringLiteral("h")).toInt(),
+                                   b.value(QStringLiteral("color")).toString(), panel_);
+        btn->setObjectName(QStringLiteral("button_") + id);
+        buttons_.insert(id, btn);
+        if (id == QLatin1String("cal")) connect(btn, &QAbstractButton::clicked, this, &StudioConsole::run_calibration);
+        else if (id == QLatin1String("ab")) connect(btn, &QAbstractButton::clicked, this, &StudioConsole::toggle_audition);
+        else if (id == QLatin1String("bleep")) {
+            connect(btn, &QAbstractButton::pressed, this, [this] { engine_->bleep().trigger(3.0f); });
+            connect(btn, &QAbstractButton::released, this, [this] { engine_->bleep().stop(); });
+        } else if (id == QLatin1String("cough")) {
+            connect(btn, &QAbstractButton::pressed, this, [this] { engine_->cough().press(true); });
+            connect(btn, &QAbstractButton::released, this, [this] { engine_->cough().release(); });
+        } else if (id == QLatin1String("mono")) {
+            connect(btn, &QAbstractButton::clicked, this, [this] {
+                auto& p = engine_->params();
+                p.mono_check.store(p.mono_check.load() ? 0 : 1);
+            });
+        } else if (id == QLatin1String("reset")) {
+            connect(btn, &QAbstractButton::clicked, this, [this] {
+                engine_->reset_meters();
+                for (auto& pk : peaks_) pk.reset();
+            });
+        } else if (id == QLatin1String("chapter")) {
+            connect(btn, &QAbstractButton::clicked, this, [this] {
+                flash_chapter_until_ = clock_.elapsed() + 1500;
+                emit chapterRequested();
+                if (on_request_chapter) on_request_chapter();
+            });
+        } else if (id == QLatin1String("report")) {
+            connect(btn, &QAbstractButton::clicked, this, [this] {
+                flash_report_until_ = clock_.elapsed() + 1500;
+                if (on_export_karte) on_export_karte();
+            });
         }
-        case MODE_COLLAB:
-            section(0, QStringLiteral("TARGET LOUDNESS"));
-            right->addWidget(build_param_row(body, param_a_, param_a_box_, -24.0f, -8.0f, {-24, -20, -16, -12, -8},
-                                             prm.collab_target_lufs.load(), QStringLiteral("LUFS")));
-            param_a_unit_ = QStringLiteral("LUFS");
-            connect(param_a_, &RackFader::dbChanged, this, [this](float v) {
-                engine_->params().collab_target_lufs.store(v); param_a_box_->set_text(fmt_unit(v, param_a_unit_)); changed(); });
-            right->addSpacing(14);
-            section(1, QStringLiteral("DUCK WHEN I TALK"));
-            right->addWidget(build_param_row(body, param_b_, param_b_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
-                                             prm.collab_duck_db.load(), QStringLiteral("dB")));
-            connect(param_b_, &RackFader::dbChanged, this, [this](float v) {
-                engine_->params().collab_duck_db.store(v); param_b_box_->set_text(fmt_unit(v, QStringLiteral("dB"))); changed(); });
-            break;
-        case MODE_GAME:
-            section(0, QStringLiteral("IMPACT CEILING"));
-            right->addWidget(build_param_row(body, param_a_, param_a_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
-                                             prm.game_ceiling_db.load(), QStringLiteral("dB")));
-            param_a_unit_ = QStringLiteral("dB");
-            connect(param_a_, &RackFader::dbChanged, this, [this](float v) {
-                engine_->params().game_ceiling_db.store(v); param_a_box_->set_text(fmt_unit(v, param_a_unit_)); changed(); });
-            right->addSpacing(14);
-            section(1, QStringLiteral("VOICE SCOOP"));
-            right->addWidget(build_param_row(body, param_b_, param_b_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
-                                             prm.game_scoop_db.load(), QStringLiteral("dB")));
-            connect(param_b_, &RackFader::dbChanged, this, [this](float v) {
-                engine_->params().game_scoop_db.store(v); param_b_box_->set_text(fmt_unit(v, QStringLiteral("dB"))); changed(); });
-            break;
-        case MODE_BGM:
-            section(0, QStringLiteral("POCKET DEPTH"));
-            right->addWidget(build_param_row(body, param_a_, param_a_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
-                                             prm.bgm_pocket_db.load(), QStringLiteral("dB")));
-            param_a_unit_ = QStringLiteral("dB");
-            connect(param_a_, &RackFader::dbChanged, this, [this](float v) {
-                engine_->params().bgm_pocket_db.store(v); param_a_box_->set_text(fmt_unit(v, param_a_unit_)); changed(); });
-            right->addSpacing(14);
-            section(1, QStringLiteral("BGM MODE"));
-            safe_key_ = new RackKey(QString(), body);
-            safe_key_->set_led(QStringLiteral("led_amber"));
-            safe_key_->setCheckable(true);
-            safe_key_->setChecked(prm.bgm_safe_mode.load() != 0);
-            swell_key_ = new RackKey(QString(), body);
-            swell_key_->set_led(QStringLiteral("led_green"));
-            swell_key_->setCheckable(true);
-            swell_key_->setChecked(prm.bgm_auto_swell.load() != 0);
-            connect(safe_key_, &RackKey::toggled, this, [this](bool on) { engine_->params().bgm_safe_mode.store(on ? 1 : 0); changed(); });
-            connect(swell_key_, &RackKey::toggled, this, [this](bool on) { engine_->params().bgm_auto_swell.store(on ? 1 : 0); changed(); });
-            key_row(safe_key_, swell_key_, 34);
-            break;
-        default:
-            break;
     }
-    right->addStretch(1);
-    section(5, QStringLiteral("OUTPUT TRIM"));
-    right->addWidget(build_trim_row(body));
-    h->addLayout(right, 1);
-    return body;
-}
 
-QWidget* StudioConsole::build_director_body() {
-    auto& prm = engine_->params();
-    auto* body = new QWidget(this);
-    auto* h = new QHBoxLayout(body);
-    h->setContentsMargins(16, 14, 16, 12);
-    h->setSpacing(10);
-    const Mode modes[4] = {MODE_VOICE, MODE_COLLAB, MODE_GAME, MODE_BGM};
-    const char* names[4] = {"VOCAL", "COLLAB", "GAME", "BGM"};
-    for (int i = 0; i < 4; ++i) {
-        auto* s = new ChannelStrip(modes[i], QStringLiteral("0%1").arg(i + 1), QString::fromLatin1(names[i]), body);
-        strips_[static_cast<std::size_t>(i)] = s;
-        connect(s, &ChannelStrip::trimMoved, this, [this](Mode m, float db) { if (bus_) bus_->push_trim(m, db); });
-        h->addWidget(s);
+    // Pilot lamps.
+    for (const QJsonValue v : items(L, "lamps")) {
+        const QJsonObject l = v.toObject();
+        lamps_.insert(l.value(QStringLiteral("label")).toString(),
+                      new hw::Lamp(centre_of(l), l.value(QStringLiteral("color")).toString(), panel_));
     }
-    h->addSpacing(6);
 
-    auto* master = new PanelBox(body);
-    auto* v = new QVBoxLayout(master);
-    v->setContentsMargins(16, 16, 16, 14);
-    v->setSpacing(6);
-    master_label_ = new SectionLabel(QStringLiteral("VIRTUAL MASTER SUM  ·  LUFS"), master);
-    v->addWidget(master_label_);
-    auto* ro = new QHBoxLayout();
-    ro->setSpacing(8);
-    const QString ml[3] = {QStringLiteral("MOMENTARY"), QStringLiteral("SHORT-TERM"), QStringLiteral("INTEGRATED")};
-    for (int i = 0; i < 3; ++i) {
-        master_[static_cast<std::size_t>(i)] = new Readout(ml[i], QString(), true, master);
-        ro->addWidget(master_[static_cast<std::size_t>(i)], 1);
+    // Digital meter windows.
+    for (const QJsonValue v : items(L, "vus")) {
+        const QJsonObject m = v.toObject();
+        const QJsonObject d = m.value(QStringLiteral("digi")).toObject();
+        const double ww = d.value(QStringLiteral("win_w")).toDouble(), wh = d.value(QStringLiteral("win_h")).toDouble();
+        const QPointF c = centre_of(m);
+        const QString kind = d.value(QStringLiteral("kind")).toString();
+        const hw::DigitalMeter::Kind k = kind == QLatin1String("ride")    ? hw::DigitalMeter::Kind::Ride
+                                         : kind == QLatin1String("phase") ? hw::DigitalMeter::Kind::Phase
+                                                                          : hw::DigitalMeter::Kind::Dbfs;
+        auto* meter = new hw::DigitalMeter(QRectF(c.x() - ww / 2, c.y() - wh / 2, ww, wh), k, panel_);
+        connect(meter, &hw::DigitalMeter::clicked, this, [this] {   // Click a meter to clear the peak hold.
+            engine_->telemetry().reset_holds();
+            for (auto& pk : peaks_) pk.reset();
+        });
+        meters_.push_back(meter);
     }
-    v->addLayout(ro);
-    v->addSpacing(14);
-    target_label_ = new SectionLabel(QStringLiteral("YOUTUBE TARGET  -12 \u00B11.5"), master);
-    v->addWidget(target_label_);
-    target_ = new TargetBar(master);
-    v->addWidget(target_);
-    v->addSpacing(6);
-    phase_label_ = new SectionLabel(QStringLiteral("PHASE CORRELATION"), master);
-    v->addWidget(phase_label_);
-    corr_ = new CorrelationBar(master);
-    v->addWidget(corr_);
-    v->addSpacing(6);
-    auto* keys = new QHBoxLayout();
-    keys->setSpacing(8);
-    mono_key_ = new RackKey(QString(), master);
-    mono_key_->set_led(QStringLiteral("led_amber"));
-    mono_key_->setCheckable(true);
-    mono_key_->setChecked(prm.mono_check.load() != 0);
-    mono_key_->setFixedHeight(32);
-    meter_reset_key_ = new RackKey(QString(), master);
-    meter_reset_key_->setFixedHeight(32);
-    keys->addWidget(mono_key_, 1);
-    keys->addWidget(meter_reset_key_, 1);
-    v->addLayout(keys);
-    connect(mono_key_, &RackKey::toggled, this, [this](bool on) { engine_->params().mono_check.store(on ? 1 : 0); });
-    connect(meter_reset_key_, &RackKey::clicked, this, [this] { engine_->reset_meters(); });
-    v->addSpacing(12);
-    scene_label_ = new SectionLabel(QStringLiteral("SCENE"), master);
-    v->addWidget(scene_label_);
-    scene_ = new SegmentedControl({}, master);
-    scene_->setFixedHeight(32);
-    v->addWidget(scene_);
-    v->addSpacing(8);
-    auto* exports = new QHBoxLayout();
-    exports->setSpacing(8);
-    chapter_key_ = new RackKey(QString(), master);
-    karte_key_ = new RackKey(QString(), master);
-    chapter_key_->setFixedHeight(32);
-    karte_key_->setFixedHeight(32);
-    exports->addWidget(chapter_key_, 1);
-    exports->addWidget(karte_key_, 1);
-    v->addLayout(exports);
-    v->addStretch(1);
-    connect(scene_, &SegmentedControl::currentChanged, this, [this](int i) {
-        engine_->params().apply_scene(i);
-        if (on_scene_macro) on_scene_macro(i);
-        changed();
-    });
-    connect(chapter_key_, &RackKey::clicked, this, [this] { emit chapterRequested(); if (on_request_chapter) on_request_chapter(); });
-    connect(karte_key_, &RackKey::clicked, this, [this] { if (on_export_karte) on_export_karte(); });
-    h->addWidget(master, 1);
-    return body;
+
+    // LED ladder (LIMITING / POCKET).
+    const QJsonArray ladders = items(L, "ladders");
+    if (!ladders.isEmpty()) {
+        const QJsonObject l = ladders.at(0).toObject();
+        QVector<QPair<double, QString>> zones;
+        for (const QJsonValue z : l.value(QStringLiteral("colors")).toArray()) {
+            const QJsonArray pair = z.toArray();
+            zones.push_back({pair.at(0).toDouble(), pair.at(1).toString()});
+        }
+        ladder_ = new hw::Ladder(centre_of(l), l.value(QStringLiteral("n")).toInt(16), zones, panel_);
+    }
+
+    // 7-segment master read-outs (UNIT 05).
+    for (const QJsonValue v : items(L, "displays")) {
+        const QJsonObject d = v.toObject();
+        const QPointF c = centre_of(d);
+        const double w = d.value(QStringLiteral("w")).toDouble(), h = d.value(QStringLiteral("h")).toDouble();
+        segs_.insert(d.value(QStringLiteral("id")).toString(),
+                     new hw::SegDisplay(QRectF(c.x() - w / 2, c.y() - h / 2, w, h), 4, panel_));
+    }
+
+    // LINK row.
+    const QJsonObject lk = L.value(QStringLiteral("links")).toObject();
+    links_ = new hw::LinkRow(lk.value(QStringLiteral("x")).toDouble(), lk.value(QStringLiteral("y")).toDouble(),
+                             lk.value(QStringLiteral("dx")).toDouble(), panel_);
 }
 
 QWidget* StudioConsole::build_mini_bar() {
     auto* bar = new QWidget(this);
     auto* h = new QHBoxLayout(bar);
-    h->setContentsMargins(16, 13, 16, 8);
+    h->setContentsMargins(24, 13, 24, 8);
     h->setSpacing(30);
     mini_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Horizontal, bar);
     mini_meter_->set_scale_visible(true);
@@ -918,31 +737,73 @@ QWidget* StudioConsole::build_mini_bar() {
     return bar;
 }
 
-void StudioConsole::relabel() {
-    const bool ja = lang_ == UiLang::JA;
-    header_->lang()->blockSignals(true);
-    header_->lang()->set_current(ja ? 0 : 1);
-    header_->lang()->blockSignals(false);
-    auto set = [](RackKey* k, const QString& en, const QString& j, bool jap) { if (k) k->setText(jap ? j : en); };
-    set(calib_key_, QStringLiteral("10 s Auto Calibrate"), QStringLiteral("10秒 自動測定"), ja);
-    set(audition_key_, QStringLiteral("A/B Audition"), QStringLiteral("A/B 試聴"), ja);
-    set(bleep_key_, QStringLiteral("Bleep  1 kHz"), QStringLiteral("ピー音  1 kHz"), ja);
-    set(cough_key_, QStringLiteral("Cough Mute"), QStringLiteral("咳ミュート"), ja);
-    set(safe_key_, QStringLiteral("Singing / Rec Safe"), QStringLiteral("歌枠・収録セーフ"), ja);
-    set(swell_key_, QStringLiteral("AFK Swell"), QStringLiteral("離席時スウェル"), ja);
-    set(mono_key_, QStringLiteral("Mono Check"), QStringLiteral("モノラル確認"), ja);
-    set(meter_reset_key_, QStringLiteral("Reset Meters"), QStringLiteral("メーターリセット"), ja);
-    set(chapter_key_, QStringLiteral("Chapter Mark"), QStringLiteral("チャプター記録"), ja);
-    set(karte_key_, QStringLiteral("Export Report"), QStringLiteral("配信カルテ出力"), ja);
-    if (scene_) {
-        const int cur = engine_->params().scene.load();
-        scene_->blockSignals(true);
-        scene_->set_options(ja ? QStringList{QStringLiteral("FPS・ゲーム"), QStringLiteral("雑談"), QStringLiteral("歌枠"), QStringLiteral("ASMR")}
-                               : QStringList{QStringLiteral("FPS / GAME"), QStringLiteral("TALK"), QStringLiteral("SINGING"), QStringLiteral("ASMR")});
-        scene_->set_current(cur);
-        scene_->blockSignals(false);
+void StudioConsole::sync_from_params() {
+    auto& p = engine_->params();
+    for (auto it = knobs_.begin(); it != knobs_.end(); ++it) {
+        if (it.value()->dragging()) continue;
+        if (auto* a = param_for(it.key())) it.value()->set_value(static_cast<double>(a->load()));
     }
-    if (status_ && director_) status_->set_link_text(ja ? QStringLiteral("ライセンス") : QStringLiteral("License"));
+    if (auto* s = selectors_.value(QStringLiteral("character"))) s->set_index(p.character.load());
+    if (auto* s = selectors_.value(QStringLiteral("space"))) s->set_index(p.space_fx.load());
+    if (auto* s = selectors_.value(QStringLiteral("scene"))) s->set_index(p.scene.load());
+    if (auto* t = toggles_.value(QStringLiteral("mono"))) t->setChecked(p.auto_mono.load() != 0);
+    if (auto* t = toggles_.value(QStringLiteral("latency"))) t->setChecked(p.zero_latency.load() == 0);
+    if (auto* t = toggles_.value(QStringLiteral("safe"))) t->setChecked(p.bgm_safe_mode.load() != 0);
+    if (auto* t = toggles_.value(QStringLiteral("swell"))) t->setChecked(p.bgm_auto_swell.load() != 0);
+    if (bus_ && bus_->raw()) {
+        for (int i = 0; i < trims_.size(); ++i) {
+            if (trims_[i]->dragging()) continue;
+            trims_[i]->set_value(static_cast<double>(bus_->raw()->trim_value_db[i].load(std::memory_order_acquire)));
+        }
+    }
+}
+
+void StudioConsole::relabel() {
+    struct Names { const char* id; QStringList en, ja; };
+    const Names sel[] = {
+        {"character", {QStringLiteral("SOFT / ASMR"), QStringLiteral("BROADCAST"), QStringLiteral("FPS / LOUD")},
+                      {QStringLiteral("ソフト・ASMR"), QStringLiteral("放送"), QStringLiteral("FPS・大声")}},
+        {"space", {QStringLiteral("DRY"), QStringLiteral("KARAOKE"), QStringLiteral("BATH"), QStringLiteral("HALL"),
+                   QStringLiteral("CAVE"), QStringLiteral("RADIO")},
+                  {QStringLiteral("ドライ"), QStringLiteral("カラオケ"), QStringLiteral("お風呂"), QStringLiteral("ホール"),
+                   QStringLiteral("洞窟"), QStringLiteral("ラジオ")}},
+        {"scene", {QStringLiteral("FPS / GAME"), QStringLiteral("TALK"), QStringLiteral("SINGING"), QStringLiteral("ASMR")},
+                  {QStringLiteral("FPS・ゲーム"), QStringLiteral("雑談"), QStringLiteral("歌枠"), QStringLiteral("ASMR")}},
+    };
+    const bool ja = lang_ == UiLang::JA;
+    for (const Names& n : sel)
+        if (auto* s = selectors_.value(QString::fromLatin1(n.id))) s->set_names(ja ? n.ja : n.en);
+
+    struct Tip { const char* id; const char* en; const char* ja; };
+    const Tip knob_tips[] = {
+        {"input", "Input gain", "入力ゲイン"}, {"output", "Output trim", "出力トリム"},
+        {"target", "Target loudness", "目標ラウドネス"}, {"duck", "Duck when I talk", "自分が話すと下げる量"},
+        {"ceiling", "Impact ceiling", "音割れ防止の天井"}, {"scoop", "Voice scoop", "声の帯域を空ける量"},
+        {"pocket", "Pocket depth", "BGM を下げる深さ"}};
+    for (const Tip& t : knob_tips)
+        if (auto* k = knobs_.value(QString::fromLatin1(t.id))) k->set_label(tr2(t.en, t.ja));
+    const char* const ch_names[] = {"01 VOCAL", "02 COLLAB", "03 GAME", "04 BGM"};
+    for (int i = 0; i < trims_.size() && i < 4; ++i)
+        trims_[i]->set_label(QString::fromLatin1(ch_names[i]) + QStringLiteral("  ") + tr2("trim", "トリム"));
+
+    const Tip toggle_tips[] = {
+        {"meter", "Meter: output peak / gain reduction", "メーター：出力ピーク ／ リミッター減衰量"},
+        {"mono", "Auto mono (one-sided mic rescue)", "片耳マイク救済（自動モノラル）"},
+        {"latency", "Look-ahead: 1.5 ms (up) / 0 ms zero latency (down)", "先読み：1.5 ms（上）／ 0 ms 低遅延（下）"},
+        {"safe", "Singing / recording safe", "歌枠・収録セーフ"},
+        {"swell", "AFK swell", "離席時スウェル"}};
+    for (const Tip& t : toggle_tips)
+        if (auto* w = toggles_.value(QString::fromLatin1(t.id))) w->setToolTip(tr2(t.en, t.ja));
+    const Tip button_tips[] = {
+        {"cal", "10 s auto calibrate", "10秒 自動測定"}, {"ab", "A/B audition", "A/B 試聴"},
+        {"bleep", "Bleep 1 kHz (hold)", "ピー音 1 kHz（押している間）"},
+        {"cough", "Cough mute (hold)", "咳ミュート（押している間）"},
+        {"mono", "Mono check", "モノラル確認"}, {"reset", "Reset meters", "メーターリセット"},
+        {"chapter", "Chapter mark", "チャプター記録"}, {"report", "Export stream report", "配信カルテ出力"}};
+    for (const Tip& t : button_tips)
+        if (auto* w = buttons_.value(QString::fromLatin1(t.id))) w->setToolTip(tr2(t.en, t.ja));
+    for (auto* m : meters_) m->setToolTip(tr2("Click to clear the peak hold", "クリックでピークホールドを解除"));
+    panel_->setToolTip(tr2("Right-click for settings", "右クリックで設定"));
     update_status();
     update();
 }
@@ -954,27 +815,31 @@ void StudioConsole::set_language(UiLang lang) {
 
 void StudioConsole::set_update_available(const QString& version) {
     update_version_ = version;
-    header_->set_update(version);
+    update_status();
 }
 
 void StudioConsole::update_status() {
-    if (!status_) return;
+    if (!panel_) return;
     const bool ja = lang_ == UiLang::JA;
     const auto& t = engine_->telemetry();
     const float fs = t.sample_rate.load();
     const double lat = fs > 0 ? engine_->latency_samples() * 1000.0 / fs : 0.0;
     const bool guard = bus_ && bus_->raw() && bus_->raw()->guard_active.load() != 0;
-    status_->set_right(QStringLiteral("%1 kHz  ·  %2 ch  ·  v1.0.0")
-                           .arg(QString::number(fs / 1000.0f, 'g', 3)).arg(t.channels.load()));
+    const QString right = QStringLiteral("%1 kHz  ·  %2 ch  ·  v1.0.0")
+                              .arg(QString::number(fs / 1000.0f, 'g', 3)).arg(t.channels.load());
+    using Lv = hw::Panel::Level;
     if (t.hint_bgm_misplug.load()) {
-        status_->set_message(StatusLine::Level::Warn, ja ? QStringLiteral("音楽を検出：BGM は 04 BGM POCKET へ")
-                                                          : QStringLiteral("Music detected: use 04 BGM POCKET"));
+        panel_->set_status(Lv::Warn, ja ? QStringLiteral("音楽を検出：BGM は 04 BGM POCKET へ")
+                                        : QStringLiteral("Music detected: use 04 BGM POCKET"), right);
     } else if (t.bridge_mode.load()) {
-        status_->set_message(StatusLine::Level::Info, ja ? QStringLiteral("VC Edition と連携中（二重処理を停止）")
-                                                          : QStringLiteral("Linked to VC Edition (no double processing)"));
+        panel_->set_status(Lv::Info, ja ? QStringLiteral("VC Edition と連携中（二重処理を停止）")
+                                        : QStringLiteral("Linked to VC Edition (no double processing)"), right);
+    } else if (!update_version_.isEmpty()) {
+        panel_->set_status(Lv::Info, ja ? QStringLiteral("アップデート %1 があります（クリックで入手）").arg(update_version_)
+                                        : QStringLiteral("Update %1 available (click to download)").arg(update_version_), right);
     } else if (t.acapella_pad.load()) {
-        status_->set_message(StatusLine::Level::Ok, ja ? QStringLiteral("雑談ソロ：天井を -1.5 dB 下げています")
-                                                        : QStringLiteral("Solo talk: ceiling lowered 1.5 dB"));
+        panel_->set_status(Lv::Ok, ja ? QStringLiteral("雑談ソロ：天井を -1.5 dB 下げています")
+                                      : QStringLiteral("Solo talk: ceiling lowered 1.5 dB"), right);
     } else {
         const QString g = guard ? (ja ? QStringLiteral("作動中") : QStringLiteral("active"))
                                 : (ja ? QStringLiteral("待機") : QStringLiteral("standby"));
@@ -987,101 +852,228 @@ void StudioConsole::update_status() {
                     if (s.in_use.load() && now - s.heartbeat_us.load() <= SharedBus::kHeartbeatGcUs) ++live;
                 }
             }
-            status_->set_message(StatusLine::Level::Ok,
+            panel_->set_status(Lv::Ok,
                 ja ? QStringLiteral("%1 ユニット リンク中  ·  Summing Guard %2  ·  先読み %3 ms").arg(live).arg(g).arg(lat, 0, 'f', 1)
-                   : QStringLiteral("%1 units linked  ·  Summing Guard %2  ·  Look-ahead %3 ms").arg(live).arg(g).arg(lat, 0, 'f', 1));
+                   : QStringLiteral("%1 units linked  ·  Summing Guard %2  ·  Look-ahead %3 ms").arg(live).arg(g).arg(lat, 0, 'f', 1),
+                right);
         } else {
-            status_->set_message(StatusLine::Level::Ok,
+            panel_->set_status(Lv::Ok,
                 ja ? QStringLiteral("動作中  ·  先読み %1 ms  ·  Summing Guard %2").arg(lat, 0, 'f', 1).arg(g)
-                   : QStringLiteral("Running  ·  Look-ahead %1 ms  ·  Summing Guard %2").arg(lat, 0, 'f', 1).arg(g));
+                   : QStringLiteral("Running  ·  Look-ahead %1 ms  ·  Summing Guard %2").arg(lat, 0, 'f', 1).arg(g),
+                right);
         }
     }
 }
 
-void StudioConsole::refresh() {
-    const auto& t = engine_->telemetry();
-    // LINK lamps.
+void StudioConsole::refresh_links() {
+    if (!links_) return;
+    std::array<hw::LinkRow::State, 5> st;
+    st.fill(hw::LinkRow::State::Off);
+    std::array<int, 5> count{};
+    count.fill(0);
     if (bus_ && bus_->raw()) {
-        bool live[5] = {false, false, false, false, false};
         const std::int64_t now = now_us();
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
             const auto& s = bus_->raw()->unit_slots[i];
             if (!s.in_use.load() || now - s.heartbeat_us.load() > SharedBus::kHeartbeatGcUs) continue;
             const int m = s.mode.load();
-            if (m >= 0 && m < 5) live[m] = true;
+            if (m < 0 || m >= 5) continue;
+            const auto k = static_cast<std::size_t>(m);
+            ++count[k];
+            // Green when any instance of this unit carries audio, dim amber when all are silent
+            // (e.g. their sources are in a scene that is not on air).
+            if (s.signal_present.load()) st[k] = hw::LinkRow::State::On;
+            else if (st[k] == hw::LinkRow::State::Off) st[k] = hw::LinkRow::State::Idle;
         }
-        header_->set_links(live);
     }
-    const float tp = t.true_peak_db.load(), hold = t.peak_hold_db.load();
-    if (out_meter_) {
-        out_meter_->set_level(tp, t.rms_db.load(), hold);
-        gr_meter_->set_gr(t.gr_db.load());
-        pk_box_->set_text(fmt_db(hold), hold > -1.0f ? Tok::red : QColor());
-        gr_box_->set_text(fmt_db(t.gr_db.load()));
-        readouts_[0]->set_value(fmt_db(tp), tp > -1.0f ? Tok::red : QColor());
-        readouts_[1]->set_value(fmt_db(t.lufs_s.load()));
-        readouts_[2]->set_value(fmt_db(t.lufs_i.load()));
-        readouts_[3]->set_value(engine_->mode() == MODE_VOICE ? fmt_signed(engine_->params().input_gain_db.load())
-                                                             : fmt_db(t.duck_db.load()));
-        if (audition_key_) audition_key_->setChecked(engine_->audition().playing() || engine_->audition().capturing());
-        if (cough_key_) cough_key_->set_lit(engine_->cough().active());
-        if (bleep_key_) bleep_key_->set_lit(engine_->bleep().active());
+    links_->set(st, count);
+}
+
+void StudioConsole::refresh_unit(qint64 now, float dt) {
+    const auto& t = engine_->telemetry();
+    Peak& pk = peaks_[0];
+    pk.feed(t.sample_peak_db.load(), now, dt);
+    const float lufs_s = t.lufs_s.load();
+    if (!meters_.isEmpty()) {
+        hw::DigitalMeter* m = meters_[0];
+        const bool narrow = m->width() < 250;
+        const QString aux_lufs = (narrow ? QStringLiteral("S-TERM %1 LUFS") : QStringLiteral("SHORT-TERM  %1 LUFS")).arg(lufs_text(lufs_s));
+        const auto* meter_sw = toggles_.value(QStringLiteral("meter"));
+        if (meter_sw && meter_sw->isChecked()) {
+            const float gr = t.gr_db.load();
+            m->set_kind(hw::DigitalMeter::Kind::Gr);
+            m->set_values(gr, 0.0, seg_db(gr), QStringLiteral("GAIN REDUCTION"), QStringLiteral("dB"),
+                          QStringLiteral("PEAK  %1 dBFS").arg(lufs_text(pk.hold)));
+        } else {
+            m->set_kind(hw::DigitalMeter::Kind::Dbfs);
+            m->set_values(pk.bar, pk.hold, seg_db(pk.hold), QStringLiteral("PEAK"), QStringLiteral("dBFS"), aux_lufs);
+        }
     }
-    if (director_ && bus_ && bus_->raw()) {
-        const std::int64_t now = now_us();
-        const Mode modes[4] = {MODE_VOICE, MODE_COLLAB, MODE_GAME, MODE_BGM};
-        for (int k = 0; k < 4; ++k) {
-            float stp = -120, rms = -120, lufs = -120, gr = 0, duck = 0;
-            bool live = false;
+    if (meters_.size() > 1) {   // UNIT 02 auto-ride gain.
+        const float ride = t.ride_db.load();
+        meters_[1]->set_values(ride, 0.0, seg_db(ride), QStringLiteral("CUT  /  BOOST"), QStringLiteral("dB"), QString());
+    }
+    const Mode mode = engine_->mode();
+    if (ladder_) {
+        // 16 LEDs over 0..-12 dB (0.8 dB per LED), as printed above the ladder.
+        const float v = mode == MODE_GAME ? t.gr_db.load() : t.duck_db.load();
+        ladder_->set_lit(v < -0.2f ? std::min(ladder_->segments(), static_cast<int>(-v / 0.8f) + 1) : 0);
+    }
+    auto lamp = [this](const char* label, bool on) {
+        if (auto* l = lamps_.value(QString::fromLatin1(label))) l->set_lit(on);
+    };
+    float voice_act = 0.0f;
+    if (bus_) bus_->read_voice_center(&voice_act);
+    lamp("RIDING", std::abs(t.ride_db.load()) > 0.5f);
+    lamp("YOU TALK", voice_act > 0.5f);
+    lamp("LIMIT", t.gr_db.load() < -0.5f);
+    lamp("SCOOPING", t.duck_db.load() < -0.5f);
+    const bool swelling = t.bgm_swelling.load() != 0;
+    lamp("VOICE DUCK", t.duck_db.load() < -0.5f && !swelling);
+    lamp("AFK SWELL", swelling);
+    lamp("COUGH LIFT", t.bgm_cough_lift.load() != 0);
+    if (auto* b = buttons_.value(QStringLiteral("cal"))) b->set_lit(engine_->calibrator().running());
+    if (auto* b = buttons_.value(QStringLiteral("ab"))) b->set_lit(engine_->audition().playing() || engine_->audition().capturing());
+    if (auto* b = buttons_.value(QStringLiteral("bleep"))) b->set_lit(engine_->bleep().active());
+    if (auto* b = buttons_.value(QStringLiteral("cough"))) b->set_lit(engine_->cough().active());
+}
+
+void StudioConsole::refresh_director(qint64 now, float dt) {
+    const auto& t = engine_->telemetry();
+    Peak& master = peaks_[4];
+    master.feed(t.sample_peak_db.load(), now, dt);
+    if (auto* s = segs_.value(QStringLiteral("p")))
+        s->set_text(seg_db(master.hold), master.hold > -1.0f ? hw::Disp::red : QColor());
+    if (auto* s = segs_.value(QStringLiteral("s"))) s->set_text(seg_db(t.lufs_s.load()));
+    if (auto* s = segs_.value(QStringLiteral("i"))) s->set_text(seg_db(t.lufs_i.load()));
+
+    // Channel meters 01-04 from the shared bus.
+    const std::int64_t now_bus = now_us();
+    for (int k = 0; k < 4 && k < meters_.size(); ++k) {
+        float sp = -120.0f, lufs = -120.0f;
+        bool live = false;
+        if (bus_ && bus_->raw()) {
             for (std::size_t i = 0; i < kMaxSlots; ++i) {
                 const auto& s = bus_->raw()->unit_slots[i];
-                if (!s.in_use.load() || s.mode.load() != modes[k]) continue;
-                if (now - s.heartbeat_us.load() > SharedBus::kHeartbeatGcUs) continue;
-                stp = s.true_peak_db.load(); rms = s.rms_db.load(); lufs = s.short_term_lufs.load();
-                gr = s.gr_db.load(); duck = s.duck_db.load(); live = true;
-                break;
+                if (!s.in_use.load() || s.mode.load() != k) continue;
+                if (now_bus - s.heartbeat_us.load() > SharedBus::kHeartbeatGcUs) continue;
+                sp = std::max(sp, s.sample_peak_db.load());
+                lufs = std::max(lufs, s.short_term_lufs.load());
+                live = true;
             }
-            strips_[static_cast<std::size_t>(k)]->update_from(stp, rms, lufs, gr, duck, live);
         }
-        const float m = t.lufs_m.load(), s = t.lufs_s.load(), i = t.lufs_i.load();
-        master_[0]->set_value(fmt_db(m));
-        master_[1]->set_value(fmt_db(s));
-        master_[2]->set_value(fmt_db(i));
-        target_->set_value(i);
-        if (i <= -119.0f) target_label_->set_right(QStringLiteral("--"), Tok::t3);
-        else if (in_youtube_golden_zone(i)) target_label_->set_right(QStringLiteral("IN RANGE"), Tok::ok, true);
-        else if (i > -10.5f) target_label_->set_right(QStringLiteral("TOO LOUD"), Tok::warn, true);
-        else target_label_->set_right(QStringLiteral("TOO QUIET"), Tok::warn, true);
-        const float pc = t.phase_corr.load();
-        phase_label_->set_right(fmt_signed(pc, 2), pc < 0 ? Tok::red : Tok::t1);
-        corr_->set_value(pc);
-        mono_key_->setChecked(engine_->params().mono_check.load() != 0);
+        Peak& pk = peaks_[static_cast<std::size_t>(k)];
+        pk.feed(sp, now, dt);
+        if (live)
+            meters_[k]->set_values(pk.bar, pk.hold, seg_db(pk.hold), QStringLiteral("PEAK"), QStringLiteral("dBFS"),
+                                   QStringLiteral("S %1 LUFS").arg(lufs_text(lufs)));
+        else
+            meters_[k]->set_values(-120.0, -120.0, QStringLiteral("----"), QStringLiteral("PEAK"), QStringLiteral("dBFS"),
+                                   QStringLiteral("NO LINK"));
     }
+    if (meters_.size() > 4) {
+        const float pc = t.phase_corr.load();
+        meters_[4]->set_values(pc, 0.0, QString::number(static_cast<double>(pc), 'f', 2), QStringLiteral("CORRELATION"),
+                               QString(), QString());
+    }
+    const float i = t.lufs_i.load();
+    const bool has = i > -119.0f;
+    auto lamp = [this](const char* label, bool on) {
+        if (auto* l = lamps_.value(QString::fromLatin1(label))) l->set_lit(on);
+    };
+    lamp("IN RANGE", has && in_youtube_golden_zone(i));
+    lamp("HIGH", has && i > -10.5f);
+    lamp("LOW", has && i < -13.5f);
+    if (auto* b = buttons_.value(QStringLiteral("mono"))) b->set_lit(engine_->params().mono_check.load() != 0);
+    if (auto* b = buttons_.value(QStringLiteral("chapter"))) b->set_lit(now < flash_chapter_until_);
+    if (auto* b = buttons_.value(QStringLiteral("report"))) b->set_lit(now < flash_report_until_);
+}
+
+void StudioConsole::refresh() {
+    const qint64 now = clock_.elapsed();
+    const float dt = last_ms_ > 0 ? std::clamp(static_cast<float>(now - last_ms_) / 1000.0f, 0.0f, 0.25f) : 0.033f;
+    last_ms_ = now;
+    sync_from_params();
+    refresh_links();
+    if (director_) refresh_director(now, dt);
+    else refresh_unit(now, dt);
+    update_status();
     if (mini_) {
-        mini_meter_->set_level(tp, t.rms_db.load(), hold);
+        const auto& t = engine_->telemetry();
+        const float sp = t.sample_peak_db.load();
+        mini_meter_->set_level(sp, t.rms_db.load(), t.peak_hold_db.load());
         auto* mv = static_cast<MiniValues*>(mini_values_);
         if (director_) mv->set({{QStringLiteral("M"), fmt_db(t.lufs_m.load())}, {QStringLiteral("S"), fmt_db(t.lufs_s.load())},
-                                {QStringLiteral("I"), fmt_db(t.lufs_i.load())}, {QStringLiteral("TP"), fmt_db(tp)}});
-        else mv->set({{QStringLiteral("TP"), fmt_db(tp)}, {QStringLiteral("S"), fmt_db(t.lufs_s.load())},
+                                {QStringLiteral("I"), fmt_db(t.lufs_i.load())}, {QStringLiteral("PK"), fmt_db(peaks_[4].hold)}});
+        else mv->set({{QStringLiteral("PK"), fmt_db(peaks_[0].hold)}, {QStringLiteral("S"), fmt_db(t.lufs_s.load())},
                       {QStringLiteral("GR"), fmt_db(t.gr_db.load())}});
     }
-    update_status();
+}
+
+void StudioConsole::show_menu(const QPoint& global) {
+    QMenu menu(this);
+    menu.setPalette(studio_palette());
+    menu.setFont(font_body());
+    QAction* ja = menu.addAction(QStringLiteral("日本語"));
+    QAction* en = menu.addAction(QStringLiteral("English"));
+    ja->setCheckable(true);
+    en->setCheckable(true);
+    ja->setChecked(lang_ == UiLang::JA);
+    en->setChecked(lang_ == UiLang::EN);
+    menu.addSeparator();
+    QAction* pin = menu.addAction(tr2("Always on top", "常に手前に表示"));
+    pin->setCheckable(true);
+    pin->setChecked(pinned_);
+    QAction* mini = menu.addAction(tr2("Compact view", "コンパクト表示"));
+    mini->setCheckable(true);
+    mini->setChecked(mini_);
+    menu.addSeparator();
+    QAction* cal = nullptr;
+    if (!director_ && engine_->mode() == MODE_VOICE) cal = menu.addAction(tr2("10 s auto calibrate...", "10秒 自動測定…"));
+    QAction* reset = menu.addAction(tr2("Reset to defaults", "初期設定に戻す"));
+    QAction* upd = nullptr;
+    if (!update_version_.isEmpty())
+        upd = menu.addAction(tr2("Download update %1", "アップデート %1 を入手").arg(update_version_));
+    QAction* deact = nullptr;
+    if (director_) {
+        menu.addSeparator();
+        deact = menu.addAction(tr2("Deactivate this PC...", "このPCの認証を解除…"));
+    }
+    QAction* chosen = menu.exec(global);
+    if (!chosen) return;
+    if (chosen == ja) set_language(UiLang::JA);
+    else if (chosen == en) set_language(UiLang::EN);
+    else if (chosen == pin) toggle_pin(!pinned_);
+    else if (chosen == mini) toggle_mini(!mini_);
+    else if (cal && chosen == cal) run_calibration();
+    else if (chosen == reset) {
+        const auto answer = QMessageBox::question(this, QStringLiteral("MODEL 600"),
+            tr2("Reset every control to its default?\nThe calibrated input gain is kept.",
+                "すべての操作を初期設定に戻しますか？\n測定済みの入力ゲインはそのまま残ります。"));
+        if (answer == QMessageBox::Yes) panic_reset();
+    } else if (upd && chosen == upd) {
+        QDesktopServices::openUrl(QUrl(QString::fromLatin1(kDownloadUrl)));
+    } else if (deact && chosen == deact) {
+        const auto answer = QMessageBox::question(this, QStringLiteral("MODEL 600"),
+            tr2("Deactivate the licence on this PC?\nDo this before moving to another PC.",
+                "このPCのライセンス認証を解除しますか？\n別のPCで使うときに行います。"));
+        if (answer == QMessageBox::Yes && on_deactivate_pc) on_deactivate_pc();
+    }
+}
+
+void StudioConsole::contextMenuEvent(QContextMenuEvent* e) {
+    show_menu(e->globalPos());   // Reached in compact view; the panel sends its own requests.
+    e->accept();
+}
+
+void StudioConsole::mouseDoubleClickEvent(QMouseEvent* e) {
+    if (mini_) toggle_mini(false);   // Double-click the compact strip to open the full panel.
+    QDialog::mouseDoubleClickEvent(e);
 }
 
 void StudioConsole::paintEvent(QPaintEvent*) {
     QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
     p.fillRect(rect(), Tok::chassis);
-    p.fillRect(QRect(kEar, 0, width() - 2 * kEar, height()), Tok::faceplate);
-    p.setPen(QPen(QColor(0x24, 0x28, 0x2D), 1));
-    p.drawLine(QPointF(kEar, 0.5), QPointF(width() - kEar, 0.5));
-    const QPixmap& screw = part(QStringLiteral("screw"));
-    auto draw_screw = [&](qreal cx, qreal cy) { p.drawPixmap(QRectF(cx - 6, cy - 6, 12, 12), screw, QRectF(screw.rect())); };
-    for (qreal cx : {kEar / 2.0, width() - kEar / 2.0}) {
-        if (height() > 200) { draw_screw(cx, 26); draw_screw(cx, height() - 26); }
-        else draw_screw(cx, height() / 2.0);
-    }
 }
 
 void StudioConsole::showEvent(QShowEvent* e) {
@@ -1111,6 +1103,7 @@ void StudioConsole::clamp_to_screen() {
 }
 
 void StudioConsole::toggle_pin(bool on) {
+    pinned_ = on;
     Qt::WindowFlags f = windowFlags();
     f.setFlag(Qt::WindowStaysOnTopHint, on);
     setWindowFlags(f);
@@ -1119,42 +1112,18 @@ void StudioConsole::toggle_pin(bool on) {
 
 void StudioConsole::toggle_mini(bool on) {
     mini_ = on;
-    header_->set_compact(on);
-    body_->setVisible(!on);
-    status_->setVisible(!on);
+    panel_->setVisible(!on);
     mini_bar_->setVisible(on);
-    if (on) {
-        setMinimumHeight(120);
-        setMaximumHeight(120);
-        resize(width(), 120);
-    } else {
-        setMinimumHeight(120);
-        setMaximumHeight(560);
-        resize(width(), 560);
-    }
+    setFixedSize(on ? QSize(panel_->sizeHint().width(), mini_bar_->height()) : panel_->sizeHint());
     refresh();
 }
 
 void StudioConsole::panic_reset() {
-    auto& prm = engine_->params();
-    prm.factory_reset_keep_calibration();
-    if (character_) character_->set_current(prm.character.load());
-    if (space_fx_) space_fx_->set_current(prm.space_fx.load());
-    if (trim_) trim_->set_db(prm.output_trim_db.load());
-    if (param_a_) {
-        switch (engine_->mode()) {
-            case MODE_COLLAB: param_a_->set_db(prm.collab_target_lufs.load()); param_b_->set_db(prm.collab_duck_db.load()); break;
-            case MODE_GAME: param_a_->set_db(prm.game_ceiling_db.load()); param_b_->set_db(prm.game_scoop_db.load()); break;
-            case MODE_BGM: param_a_->set_db(prm.bgm_pocket_db.load()); break;
-            default: break;
-        }
-    }
-    if (safe_key_) safe_key_->setChecked(prm.bgm_safe_mode.load() != 0);
-    if (swell_key_) swell_key_->setChecked(prm.bgm_auto_swell.load() != 0);
-    if (mono_key_) mono_key_->setChecked(false);
-    if (scene_) { scene_->blockSignals(true); scene_->set_current(prm.scene.load()); scene_->blockSignals(false); }
+    engine_->params().factory_reset_keep_calibration();
     engine_->telemetry().reset_holds();
     engine_->reset_meters();
+    for (auto& pk : peaks_) pk.reset();
+    sync_from_params();
     changed();
 }
 

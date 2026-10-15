@@ -381,6 +381,7 @@ def materials():
     M["glass"] = mat_principled("Glass", "#FFFFFF", rough=0.03, transmission=1.0, ior=1.45, spec=0.5)
     M["needle"] = mat_principled("Needle", "#101010", rough=0.5)
     M["thin_glass"] = mat_thin_glass()
+    M["screen_off"] = mat_principled("ScreenOff", "#0B0806", rough=0.6)
     M["recess"] = mat_principled("Recess", "#050506", rough=0.8)
     M["rack"] = mat_principled("Rack", "#141518", metallic=0.6, rough=0.5)
     # Illuminated caps: frosted lenses. Off = dim tinted glass, on = saturated glow.
@@ -391,6 +392,8 @@ def materials():
     M["jewel"] = mat_principled("Jewel", "#C21A12", rough=0.08, coat=1.0, emission="#FF2A12", estr=1.6,
                                 transmission=0.4, ior=1.6)
     M["green_on"] = mat_principled("GreenOn", "#3FD07A", rough=0.2, emission="#47E28A", estr=2.5)
+    M["led_idle"] = mat_principled("LedIdle", "#5A3A14", rough=0.2, coat=0.8, emission="#FF9A2E", estr=0.35)
+    M["led_off"] = mat_principled("LedOff", "#141613", rough=0.2, coat=0.8)
     # Pilot lamps and LED ladder segments.
     for name, (base, glow, dark) in LAMP_COLORS.items():
         M[f"lamp_{name}_on"] = mat_principled(f"Lamp{name}On", base, rough=0.15, coat=1.0, emission=glow, estr=1.8)
@@ -469,9 +472,19 @@ def knob_trim(cx, cy, r_px, angle, z0):
 
 
 def toggle(cx, cy, on, horizontal, z0, k=1.35):
+    toggle_base(cx, cy, z0, k)
+    toggle_lever(cx, cy, on, horizontal, z0, k)
+
+
+def toggle_base(cx, cy, z0, k=1.35):
+    """Static part: washer, hex nut and bushing."""
     cyl(0.085 * k, 0.03, P(cx, cy, z0 + 0.015), M["steel"], 64, bevel=0.006)
     cyl(0.06 * k, 0.05, P(cx, cy, z0 + 0.055), M["chrome"], 6, bevel=0.006)
     cyl(0.045 * k, 0.03, P(cx, cy, z0 + 0.09), M["chrome"], 48)
+
+
+def toggle_lever(cx, cy, on, horizontal, z0, k=1.35):
+    """Moving part: bat lever and ball tip."""
     tilt = math.radians(28) * (1 if on else -1)
     half = 0.13 * k
     # Lever axis: from the bushing top, leaning toward the "on" side.
@@ -486,10 +499,19 @@ def toggle(cx, cy, on, horizontal, z0, k=1.35):
 
 
 def push_button(cx, cy, w, h, color, lit, z0):
+    button_bezel(cx, cy, w, h, z0)
+    button_cap(cx, cy, w, h, color, lit, z0)
+
+
+def button_bezel(cx, cy, w, h, z0):
     box((w * S + 0.06, h * S + 0.06, 0.05), P(cx, cy, z0 + 0.025), M["bezel"], bevel=0.015)
     box((w * S + 0.01, h * S + 0.01, 0.03), P(cx, cy, z0 + 0.06), M["recess"])
+
+
+def button_cap(cx, cy, w, h, color, lit, z0, pressed=False):
     mat = M[f"{color}_{'on' if lit else 'off'}"]
-    box((w * S - 0.02, h * S - 0.02, 0.08), P(cx, cy, z0 + 0.1), mat, bevel=0.025)
+    dz = -0.02 if pressed else 0.0
+    return box((w * S - 0.02, h * S - 0.02, 0.08), P(cx, cy, z0 + 0.1 + dz), mat, bevel=0.025)
 
 
 def jewel(cx, cy, z0):
@@ -500,19 +522,37 @@ def jewel(cx, cy, z0):
     o.data.materials.append(M["jewel"])
 
 
-def led(cx, cy, z0, on=True):
-    cyl(0.07, 0.03, P(cx, cy, z0 + 0.015), M["chrome"], 48, bevel=0.006)
+def led_lens(cx, cy, z0, state):
+    """LINK LED lens: "on" green, "idle" dim amber (linked but silent), "off" dark."""
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.05, location=P(cx, cy, z0 + 0.03))
     o = bpy.context.active_object
     o.scale.z = 0.7
     bpy.ops.object.shade_smooth()
-    o.data.materials.append(M["green_on"] if on else M["recess"])
+    o.data.materials.append({"on": M["green_on"], "idle": M["led_idle"], "off": M["led_off"]}[state])
+    return o
+
+
+def led_bezel(cx, cy, z0):
+    cyl(0.07, 0.03, P(cx, cy, z0 + 0.015), M["chrome"], 48, bevel=0.006)
+
+
+def led(cx, cy, z0, state="on"):
+    led_bezel(cx, cy, z0)
+    led_lens(cx, cy, z0, state)
 
 
 def pilot_lamp(cx, cy, color, lit, z0):
     """Panel pilot lamp: knurled chrome bezel + smooth domed lens."""
+    lamp_bezel(cx, cy, z0)
+    lamp_lens(cx, cy, color, lit, z0)
+
+
+def lamp_bezel(cx, cy, z0):
     cyl(0.115, 0.05, P(cx, cy, z0 + 0.025), M["chrome"], 64, bevel=0.012)
     cyl(0.085, 0.03, P(cx, cy, z0 + 0.06), M["recess"], 64)
+
+
+def lamp_lens(cx, cy, color, lit, z0):
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.085, location=P(cx, cy, z0 + 0.06), segments=48, ring_count=24)
     o = bpy.context.active_object
     o.scale.z = 0.62
@@ -522,11 +562,20 @@ def pilot_lamp(cx, cy, color, lit, z0):
 
 def ladder(L, z0):
     """Row of rectangular LEDs in a black window."""
+    ladder_frame(L, z0)
+    ladder_segments(L, z0)
+
+
+def ladder_frame(L, z0):
+    n = L["n"]
+    box(((n * 16 + 12) * S, 30 * S, 0.04), P(L["cx"], L["cy"], z0 + 0.02), M["bezel"], bevel=0.01)
+    box(((n * 16 + 4) * S, 22 * S, 0.02), P(L["cx"], L["cy"], z0 + 0.04), M["recess"])
+
+
+def ladder_segments(L, z0):
     pitch = 16
     n = L["n"]
     x0 = L["cx"] - (n * pitch) / 2 + pitch / 2
-    box(((n * pitch + 12) * S, 30 * S, 0.04), P(L["cx"], L["cy"], z0 + 0.02), M["bezel"], bevel=0.01)
-    box(((n * pitch + 4) * S, 22 * S, 0.02), P(L["cx"], L["cy"], z0 + 0.04), M["recess"])
     for i in range(n):
         frac = i / max(1, n - 1)
         color = L["colors"][0][1]
@@ -537,12 +586,15 @@ def ladder(L, z0):
         box((11 * S, 16 * S, 0.03), P(x0 + i * pitch, L["cy"], z0 + 0.055), mat, bevel=0.004, segs=2)
 
 
-def seg_display(num, d, z0):
-    """7-segment window: bezel, emissive digit plate, glass."""
+def seg_display(num, d, z0, content=True):
+    """7-segment window: bezel, emissive digit plate, glass. content=False leaves a dark window."""
     cx, cy, w, h = d["cx"], d["cy"], d["w"], d["h"]
     frame = box(((w + 16) * S, (h + 16) * S, 0.12), P(cx, cy, z0 + 0.06), M["bezel"], bevel=0.03)
     hole = box((w * S, h * S, 0.5), P(cx, cy, z0 + 0.1))
     boolean_cut(frame, hole)
+    if not content:
+        plane(w * S, h * S, P(cx, cy, z0 + 0.01), M["screen_off"])
+        return
     mat = mat_screen(f"Seg{num}{d['id']}", os.path.join(TEX, f"unit{num}_seg_{d['id']}.png"), 1.15)
     plane(w * S, h * S, P(cx, cy, z0 + 0.01), mat)
     plane(w * S, h * S, P(cx, cy, z0 + 0.09), M["thin_glass"])
@@ -556,7 +608,7 @@ def deflection(kind, value):
     return 46 * value
 
 
-def digital_meter(num, idx, v, z0):
+def digital_meter(num, idx, v, z0, content=True):
     """Digital meter: black bezel, recessed emissive window (7-segment value + LED bar), glass."""
     cx, cy, w, h = v["cx"], v["cy"], v["w"], v["h"]
     m = v["digi"]
@@ -564,6 +616,9 @@ def digital_meter(num, idx, v, z0):
     frame = box((w * S, h * S, 0.14), P(cx, cy, z0 + 0.07), M["bezel"], bevel=0.03)
     hole = box((ww * S, wh * S, 0.5), P(cx, cy, z0 + 0.1))
     boolean_cut(frame, hole)
+    if not content:
+        plane(ww * S, wh * S, P(cx, cy, z0 + 0.01), M["screen_off"])
+        return
     mat = mat_screen(f"Meter{num}_{idx}", os.path.join(TEX, f"unit{num}_meter_{idx}.png"), 1.15)
     plane(ww * S, wh * S, P(cx, cy, z0 + 0.01), mat)
     plane(ww * S, wh * S, P(cx, cy, z0 + 0.11), M["thin_glass"])
@@ -588,7 +643,7 @@ def vu_meter(v, z0):
     cyl(0.05 * max(0.7, k), 0.02, P(cx, cy + h / 2 - 9 * max(0.7, k), z0 + 0.17), M["steel"], 32, bevel=0.005)
 
 
-def faceplate(num, u):
+def faceplate(num, u, static=False):
     w, h = u["panel"]["w"], u["panel"]["h"]
     ear = u["panel"]["ear"]
     plate = box((w * S, h * S, 0.12), P(w / 2, h / 2, -0.06), M["panel"], bevel=0.02)
@@ -599,7 +654,8 @@ def faceplate(num, u):
     for x in (ear, w - ear):
         box((0.02, h * S, 0.01), P(x, h / 2, 0.002), M["recess"])
     plane(w * S, h * S, P(w / 2, h / 2, 0.003),
-          mat_image(f"Decal{num}", os.path.join(TEX, f"unit{num}_decal.png"), rough=0.55, decal=True))
+          mat_image(f"Decal{num}{'s' if static else ''}",
+                    os.path.join(TEX, f"unit{num}_decal{'_static' if static else ''}.png"), rough=0.55, decal=True))
     for x, y in u["screws"]:
         screw(x, y, 0.0)
 
@@ -636,8 +692,8 @@ def build_unit(num, origin=(0.0, 0.0, 0.0)):
     j = u["jewel"]
     jewel(j["cx"], j["cy"], 0.0)
     L = u["links"]
-    for i, on in enumerate(L["lit"]):
-        led(L["x"] + i * L["dx"], L["y"], 0.0, on)
+    for i, state in enumerate(L["state"]):
+        led(L["x"] + i * L["dx"], L["y"], 0.0, state)
 
 
 # ---- Cameras -------------------------------------------------------------------------
@@ -768,6 +824,170 @@ def shot_knobs():
     render(sc, "knob_study.png")
 
 
+# ---- Qt assets ------------------------------------------------------------------------
+#  Static background per unit (everything that never moves), plus sprites for every
+#  moving part, rendered with the same lights from the same orthographic camera so
+#  they composite seamlessly. Moving parts are present in the background render as
+#  camera-invisible proxies: they still cast their shadows and show in reflections.
+FRAMES = os.environ.get("M600_FRAMES", os.path.join(HERE, "_frames"))
+BIG_FRAMES = 61                       # 4.5 degree steps over the 270 degree sweep.
+
+
+def created(fn, *a, **kw):
+    before = set(bpy.data.objects)
+    fn(*a, **kw)
+    return [o for o in bpy.data.objects if o not in before]
+
+
+def hide_from_camera(objs):
+    for o in objs:
+        o.visible_camera = False
+
+
+def knob_angle_of(k):
+    return -SWEEP + (k["value"] - k["min"]) / (k["max"] - k["min"]) * 2 * SWEEP
+
+
+def selector_angles(k):
+    n = len(k["positions"])
+    return [round(-k["spread"] + (2 * k["spread"] * i / (n - 1) if n > 1 else 0), 2) for i in range(n)]
+
+
+def build_static(num):
+    u = UNITS[num]
+    set_frame(u["panel"]["w"], u["panel"]["h"])
+    faceplate(num, u, static=True)
+    for i, v in enumerate(u["vus"]):
+        digital_meter(num, i, v, 0.0, content=False)
+    for d in u["displays"]:
+        seg_display(num, d, 0.0, content=False)
+    for L in u["ladders"]:
+        ladder_frame(L, 0.0)
+    for t in u["toggles"]:
+        toggle_base(t["cx"], t["cy"], 0.0)
+        hide_from_camera(created(toggle_lever, t["cx"], t["cy"], t["on"], t.get("horizontal", False), 0.0))
+    for b in u["buttons"]:
+        button_bezel(b["cx"], b["cy"], b["w"], b["h"], 0.0)
+        hide_from_camera(created(button_cap, b["cx"], b["cy"], b["w"], b["h"], b["color"], False, 0.0))
+    for l in u["lamps"]:
+        lamp_bezel(l["cx"], l["cy"], 0.0)
+    for k in u["knobs_big"]:
+        hide_from_camera(created(knob_machined, k["cx"], k["cy"], k["r"], knob_angle_of(k), 0.0))
+    for k in u["knobs_step"]:
+        hide_from_camera(created(knob_chicken, k["cx"], k["cy"], k["r"], selector_angles(k)[k["value"]], 0.0))
+    for k in u["knobs_trim"]:
+        hide_from_camera(created(knob_trim, k["cx"], k["cy"], k["r"], 0.0, 0.0))
+    j = u["jewel"]
+    jewel(j["cx"], j["cy"], 0.0)
+    L = u["links"]
+    for i in range(5):
+        led_bezel(L["x"] + i * L["dx"], L["y"], 0.0)
+
+
+def shot_backgrounds(nums):
+    os.makedirs(FRAMES, exist_ok=True)
+    for num in nums:
+        sc = reset(48 if PREVIEW else 256)
+        world(sc, strength=0.8)
+        studio_lights()
+        materials()
+        build_static(num)
+        cam_front(sc, PW, PH, 1 if PREVIEW else 2)
+        auto_smooth()
+        sc.render.filepath = os.path.join(FRAMES, f"bg_{num}.png")
+        bpy.ops.render.render(write_still=True)
+        print("[v2] wrote", sc.render.filepath)
+
+
+def sprite_scene(samples):
+    sc = reset(samples)
+    world(sc, strength=0.8)
+    studio_lights()
+    materials()
+    set_frame(1100, 480)
+    # The plate is invisible to the camera but still reflects into chrome and casts bounce light.
+    plate = box((PW * S, PH * S, 0.12), P(PW / 2, PH / 2, -0.06), M["panel"], bevel=0.02)
+    plate.visible_camera = False
+    sc.render.film_transparent = True
+    return sc
+
+
+def sprite_cam(sc, cx, cy, w, h, scale=2):
+    for o in list(bpy.data.objects):
+        if o.type == "CAMERA":
+            bpy.data.objects.remove(o, do_unlink=True)
+    cd = bpy.data.cameras.new("C")
+    cd.type = "ORTHO"
+    cd.ortho_scale = max(w, h) * S
+    c = bpy.data.objects.new("C", cd)
+    c.location = P(cx, cy, 20)
+    link(c)
+    sc.camera = c
+    sc.render.resolution_x = int(w * scale)
+    sc.render.resolution_y = int(h * scale)
+
+
+def render_sprite(sc, name, objs):
+    auto_smooth()
+    sc.render.filepath = os.path.join(FRAMES, name + ".png")
+    bpy.ops.render.render(write_still=True)
+    for o in objs:
+        bpy.data.objects.remove(o, do_unlink=True)
+
+
+def shot_sprites():
+    os.makedirs(FRAMES, exist_ok=True)
+    sc = sprite_scene(32 if PREVIEW else 128)
+    cx, cy = 550, 240
+    manifest = {}
+    # Knob filmstrips.
+    angles = [-SWEEP + 2 * SWEEP * i / (BIG_FRAMES - 1) for i in range(BIG_FRAMES)]
+    for name, fn, r, margin in (("knob_big", knob_machined, 54, 8), ("knob_mid", knob_machined, 42, 8),
+                                ("knob_trim", knob_trim, 17, 6)):
+        size = 2 * (r + margin)
+        sprite_cam(sc, cx, cy, size, size)
+        frames = angles if not PREVIEW else angles[:: (BIG_FRAMES - 1) // 4]
+        for i, a in enumerate(frames):
+            render_sprite(sc, f"{name}_{i:03d}", created(fn, cx, cy, r, a, 0.0))
+        manifest[name] = {"size": size, "radius": r, "angles": frames}
+    # Selector (chicken head): exactly the detents used on the panels.
+    sel = sorted({a for u in UNITS.values() for k in u["knobs_step"] for a in selector_angles(k)})
+    size = 2 * (round(28 * 1.55) + 8)
+    sprite_cam(sc, cx, cy, size, size)
+    for i, a in enumerate(sel):
+        render_sprite(sc, f"selector_{i:03d}", created(knob_chicken, cx, cy, 28, a, 0.0))
+    manifest["selector"] = {"size": size, "radius": 28, "angles": sel}
+    # Toggle levers (the nut is in the background).
+    sprite_cam(sc, cx, cy, 64, 64)
+    for name, on, hz in (("toggle_up", True, False), ("toggle_down", False, False),
+                         ("toggle_right", True, True), ("toggle_left", False, True)):
+        render_sprite(sc, name, created(toggle_lever, cx, cy, on, hz, 0.0))
+        manifest[name] = {"size": 64}
+    # Push-button caps, released and pressed, lit and dark.
+    for w, h in ((54, 34), (52, 32)):
+        sprite_cam(sc, cx, cy, w + 10, h + 10)
+        for color in ("amber", "red"):
+            for lit in (False, True):
+                for pressed in (False, True):
+                    name = f"cap_{color}_{'on' if lit else 'off'}{'_down' if pressed else ''}_{w}x{h}"
+                    render_sprite(sc, name, created(button_cap, cx, cy, w, h, color, lit, 0.0, pressed))
+                    manifest[name] = {"w": w + 10, "h": h + 10}
+    # Pilot lamp lenses and LINK LED lenses.
+    sprite_cam(sc, cx, cy, 28, 28)
+    for color in ("amber", "green", "red"):
+        for lit in (False, True):
+            name = f"lamp_{color}_{'on' if lit else 'off'}"
+            render_sprite(sc, name, created(lamp_lens, cx, cy, color, lit, 0.0))
+            manifest[name] = {"size": 28}
+    sprite_cam(sc, cx, cy, 16, 16)
+    for state in ("on", "idle", "off"):
+        render_sprite(sc, f"led_{state}", created(led_lens, cx, cy, 0.0, state))
+        manifest[f"led_{state}"] = {"size": 16}
+    with open(os.path.join(FRAMES, "sprites.json"), "w") as f:
+        json.dump(manifest, f, indent=1)
+    print("[v2] sprites done:", len(manifest))
+
+
 if __name__ == "__main__":
     if SHOT == "front":
         for n in (POS or ["01"]):
@@ -778,5 +998,9 @@ if __name__ == "__main__":
         shot_rack()
     elif SHOT == "knob":
         shot_knobs()
+    elif SHOT == "backgrounds":
+        shot_backgrounds(POS or list(UNITS))
+    elif SHOT == "sprites":
+        shot_sprites()
     else:
         raise SystemExit(f"unknown shot {SHOT}")

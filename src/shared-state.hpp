@@ -120,8 +120,11 @@ struct alignas(128) InstanceSlot {
 
     std::atomic<std::int32_t> cough_active;  // 1 while UNIT 01 cough-mute is engaged.
 
+    // Sample peak in dBFS, the scale OBS's own mixer meters use. Occupies the
+    // former slot_reserved1 word: same size and offset, so the ABI is unchanged.
+    std::atomic<float> sample_peak_db;
+
     // Pad to a clean 128-byte footprint so sizeof() stays deterministic.
-    std::atomic<std::int32_t> slot_reserved1;
     std::atomic<std::int32_t> slot_reserved2;
     std::atomic<std::int32_t> slot_reserved3;
     std::atomic<std::int32_t> slot_reserved4;
@@ -145,7 +148,7 @@ struct alignas(128) InstanceSlot {
         signal_present.store(0, std::memory_order_relaxed);
         is_loud_now.store(0, std::memory_order_relaxed);
         cough_active.store(0, std::memory_order_relaxed);
-        slot_reserved1.store(0, std::memory_order_relaxed);
+        sample_peak_db.store(-120.0f, std::memory_order_relaxed);
         slot_reserved2.store(0, std::memory_order_relaxed);
         slot_reserved3.store(0, std::memory_order_relaxed);
         slot_reserved4.store(0, std::memory_order_relaxed);
@@ -334,6 +337,12 @@ public:
             if (s.cough_active.load(std::memory_order_acquire) != 0) return true;
         }
         return false;
+    }
+
+    // Sample peak (dBFS) for OBS-style meters on UNIT 05.
+    void publish_sample_peak(float db) noexcept {
+        if (!valid()) return;
+        view_->unit_slots[my_slot_index_].sample_peak_db.store(db, std::memory_order_release);
     }
 
     void set_signal_present(bool present) noexcept {
@@ -604,6 +613,7 @@ private:
             if (age > kMeterDecayUs) {
                 // Exponential decay of visible meters toward -120 dB / 0 energy.
                 decay_toward(s.true_peak_db, -120.0f, 0.5f);
+                decay_toward(s.sample_peak_db, -120.0f, 0.5f);
                 decay_toward(s.rms_db, -120.0f, 0.5f);
                 decay_toward(s.short_term_lufs, -120.0f, 0.5f);
                 decay_toward(s.gr_db, 0.0f, 0.5f);

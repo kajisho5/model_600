@@ -14,6 +14,7 @@
 #include "ui-theme.hpp"
 #include "ui-widgets.hpp"
 
+#include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -96,8 +97,8 @@ T* child(QWidget* root, const char* name) { return root->findChild<T*>(QString::
 
 void console_shot(Engine& e, SharedBus& bus, bool director, UiLang lang, const QString& name,
                   int w, const std::function<void(StudioConsole&)>& prep = {}) {
+    (void)w;   // The v2 faceplates have a fixed size per unit.
     StudioConsole con(&e, &bus, director, true);
-    con.resize(w, 560);
     con.set_language(lang);
     con.show();
     if (prep) prep(con);
@@ -223,7 +224,8 @@ int main(int argc, char** argv) {
     voice.telemetry().hint_bgm_misplug.store(1);
     console_shot(voice, bus_v, false, UiLang::JA, QStringLiteral("03_console_unit01_states.png"), 560, [](StudioConsole& c) {
         c.set_update_available(QStringLiteral("1.1.0"));
-        if (auto* pin = child<RackKey>(&c, "pin")) pin->setChecked(true);
+        // Meter switch on GR: the window shows the limiter's gain reduction.
+        if (auto* sw = child<QAbstractButton>(&c, "toggle_meter")) sw->click();
     });
     voice.telemetry().hint_bgm_misplug.store(0);
     console_shot(collab, bus_c, false, UiLang::JA, QStringLiteral("04_console_unit02_collab.png"), 560);
@@ -232,10 +234,10 @@ int main(int argc, char** argv) {
     console_shot(director, bus_d, true, UiLang::JA, QStringLiteral("07_console_director_ja.png"), 1120);
     console_shot(director, bus_d, true, UiLang::EN, QStringLiteral("08_console_director_en.png"), 1120);
     console_shot(voice, bus_v, false, UiLang::JA, QStringLiteral("09_mini_unit01.png"), 560, [](StudioConsole& c) {
-        if (auto* fold = child<RackKey>(&c, "fold")) fold->click();
+        c.set_compact(true);
     });
     console_shot(director, bus_d, true, UiLang::JA, QStringLiteral("10_mini_director.png"), 1120, [](StudioConsole& c) {
-        if (auto* fold = child<RackKey>(&c, "fold")) fold->click();
+        c.set_compact(true);
     });
 
     // Calibration modal states (driven by real calibrator runs).

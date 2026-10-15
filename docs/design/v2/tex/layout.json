@@ -60,12 +60,19 @@
         "x": 806,
         "y": 186,
         "dx": 38,
-        "lit": [
-          true,
-          true,
-          true,
-          true,
-          true
+        "state": [
+          "on",
+          "on",
+          "idle",
+          "on",
+          "on"
+        ],
+        "count": [
+          1,
+          1,
+          1,
+          2,
+          1
         ]
       },
       "vus": [
@@ -306,12 +313,19 @@
         "x": 908,
         "y": 186,
         "dx": 30,
-        "lit": [
-          true,
-          true,
-          true,
-          true,
-          true
+        "state": [
+          "on",
+          "on",
+          "idle",
+          "on",
+          "on"
+        ],
+        "count": [
+          1,
+          1,
+          1,
+          2,
+          1
         ]
       },
       "vus": [
@@ -521,12 +535,19 @@
         "x": 806,
         "y": 186,
         "dx": 38,
-        "lit": [
-          true,
-          true,
-          true,
-          true,
-          true
+        "state": [
+          "on",
+          "on",
+          "idle",
+          "on",
+          "on"
+        ],
+        "count": [
+          1,
+          1,
+          1,
+          2,
+          1
         ]
       },
       "vus": [
@@ -737,12 +758,19 @@
         "x": 806,
         "y": 186,
         "dx": 38,
-        "lit": [
-          true,
-          true,
-          true,
-          true,
-          true
+        "state": [
+          "on",
+          "on",
+          "idle",
+          "on",
+          "on"
+        ],
+        "count": [
+          1,
+          1,
+          1,
+          2,
+          1
         ]
       },
       "vus": [
@@ -959,12 +987,19 @@
         "x": 908,
         "y": 176,
         "dx": 30,
-        "lit": [
-          true,
-          true,
-          true,
-          true,
-          true
+        "state": [
+          "on",
+          "on",
+          "idle",
+          "on",
+          "on"
+        ],
+        "count": [
+          1,
+          1,
+          1,
+          2,
+          1
         ]
       },
       "vus": [

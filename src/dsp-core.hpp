@@ -1137,7 +1137,8 @@ struct Params {
 //  Telemetry snapshot published by the engine every block (atomic floats).
 // -----------------------------------------------------------------------------
 struct Telemetry {
-    std::atomic<float> true_peak_db{kSilenceDb};
+    std::atomic<float> true_peak_db{kSilenceDb};   // Inter-sample peak (dBTP).
+    std::atomic<float> sample_peak_db{kSilenceDb}; // Sample peak (dBFS), as OBS meters show.
     std::atomic<float> peak_hold_db{kSilenceDb};
     std::atomic<float> rms_db{kSilenceDb};
     std::atomic<float> lufs_m{kSilenceDb};
@@ -1145,6 +1146,7 @@ struct Telemetry {
     std::atomic<float> lufs_i{kSilenceDb};
     std::atomic<float> gr_db{0.0f};
     std::atomic<float> duck_db{0.0f};
+    std::atomic<float> ride_db{0.0f};           // UNIT 02 auto-leveler gain (cut < 0 < boost).
     std::atomic<float> phase_corr{1.0f};
     std::atomic<float> voice_center_hz{1600.0f};
     std::atomic<float> voice_activity{0.0f};
@@ -1340,7 +1342,7 @@ private:
 
         float frame[kMaxChannels];
         float dry_frame[kMaxChannels];
-        float block_peak = 0.0f, block_rms_acc = 0.0f;
+        float block_peak = 0.0f, block_rms_acc = 0.0f, block_sample_peak = 0.0f;
         float duck_db_now = 0.0f;
         float gr_min = 0.0f;
 
@@ -1428,6 +1430,8 @@ private:
                 planar[c][idx] = v;
                 const float p = tp_meter_[c].push(v);
                 if (p > fpk) fpk = p;
+                const float a = std::fabs(v);
+                if (a > block_sample_peak) block_sample_peak = a;
                 if (!(lfe_layout && c == 3)) sq += v * v;
             }
             if (fpk > block_peak) block_peak = fpk;
@@ -1445,6 +1449,7 @@ private:
         const float tp_db = lin_to_db(block_peak);
         const float rms_db = block_rms_acc > 0.0f ? 10.0f * std::log10(block_rms_acc / static_cast<float>(n)) : kSilenceDb;
         tele_.true_peak_db.store(tp_db, std::memory_order_relaxed);
+        tele_.sample_peak_db.store(lin_to_db(block_sample_peak), std::memory_order_relaxed);
         if (tp_db > tele_.peak_hold_db.load(std::memory_order_relaxed)) tele_.peak_hold_db.store(tp_db, std::memory_order_relaxed);
         if (tp_db > tele_.session_peak_db.load(std::memory_order_relaxed)) tele_.session_peak_db.store(tp_db, std::memory_order_relaxed);
         tele_.rms_db.store(rms_db, std::memory_order_relaxed);
@@ -1453,6 +1458,7 @@ private:
         tele_.lufs_i.store(lufs_.integrated(), std::memory_order_relaxed);
         tele_.gr_db.store(gr_min, std::memory_order_relaxed);
         tele_.duck_db.store(duck_db_now, std::memory_order_relaxed);
+        tele_.ride_db.store(mode_ == MODE_COLLAB ? lin_to_db(leveler_gain_) : 0.0f, std::memory_order_relaxed);
         if (gr_min < -3.0f && !scream_latched_) { tele_.scream_defense_count.fetch_add(1, std::memory_order_relaxed); scream_latched_ = true; }
         else if (gr_min > -0.5f) scream_latched_ = false;
         if (nch >= 2) {
@@ -1469,6 +1475,7 @@ private:
         if (bus_) {
             const float energy = block_rms_acc / static_cast<float>(n);
             bus_->publish_telemetry(tp_db, rms_db, lufs_.short_term(), gr_min, duck_db_now, energy, tp_db > -6.0f);
+            bus_->publish_sample_peak(lin_to_db(block_sample_peak));
             bus_->set_signal_present(rms_db > -60.0f);
             if (mode_ == MODE_VOICE) {
                 bus_->set_mic_muted(mic_muted);

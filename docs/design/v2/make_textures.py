@@ -44,6 +44,11 @@ TRIM_TICK0, TRIM_TICK_MAJOR, TRIM_TICK_MINOR, TRIM_NUM = 7, 13, 11, 22
 
 
 # ---- Layout -------------------------------------------------------------------------
+# LINK lamp sample state (the same moment on every panel): green = linked and
+# carrying audio, dim amber = linked but silent (e.g. its source is not on air),
+# off = no instance. `count` > 1 shows how many instances of that unit exist.
+LINK_SAMPLE = {"state": ["on", "on", "idle", "on", "on"], "count": [1, 1, 1, 2, 1]}
+
 def common(number, name, tagline, h=480, links=None, pro=False):
     return {
         "number": number, "name": name, "tagline": tagline, "color": UNIT_COLORS[number], "pro": pro,
@@ -51,7 +56,7 @@ def common(number, name, tagline, h=480, links=None, pro=False):
         "screws": [[20, 64], [20, h - 64], [1080, 64], [1080, h - 64]],
         "slots": [[20, 64], [20, h - 64], [1080, 64], [1080, h - 64]],
         "jewel": {"cx": 1002, "cy": 104, "label": "POWER"},
-        "links": links or {"x": 806, "y": 186, "dx": 38, "lit": [True] * 5},
+        "links": links or {"x": 806, "y": 186, "dx": 38, **LINK_SAMPLE},
         "vus": [], "knobs_big": [], "knobs_step": [], "knobs_trim": [], "toggles": [], "buttons": [],
         "lamps": [], "ladders": [], "displays": [], "flow": None, "target": None,
     }
@@ -119,7 +124,7 @@ def unit01():
 def unit02():
     # Story: you talk -> the guest is dipped; otherwise the guest is ridden to the target.
     u = common("02", "COLLAB RIDER", "GUEST VOICE AUTO-RIDER",
-               links={"x": 908, "y": 186, "dx": 30, "lit": [True] * 5})
+               links={"x": 908, "y": 186, "dx": 30, **LINK_SAMPLE})
     u["vus"] = [digi(500, 160, 220, 152, "GUEST LEVEL", "dbfs", "-9.4", -9.4, "PEAK", "dBFS",
                      aux="S-TERM -16.8 LUFS", hold=-6.0),
                 digi(736, 160, 220, 152, "AUTO RIDE", "ride", "-3.5", -3.5, "CUT  /  BOOST", "dB")]
@@ -181,7 +186,7 @@ def unit04():
 def unit05():
     h = 660
     u = common("05", "STREAM DIRECTOR", "MASTER LOUDNESS DIRECTOR", h=h, pro=True,
-               links={"x": 908, "y": 176, "dx": 30, "lit": [True] * 5})
+               links={"x": 908, "y": 176, "dx": 30, **LINK_SAMPLE})
     u["displays"] = [
         {"id": "p", "cx": 496, "cy": 96, "w": 112, "h": 56, "text": "-1.0", "label": "MASTER PEAK  dBFS"},
         {"id": "s", "cx": 640, "cy": 96, "w": 112, "h": 56, "text": "-14.1", "label": "SHORT-TERM  LUFS"},
@@ -263,7 +268,7 @@ def fmt_mark(v):
 
 
 # ---- Panel print ------------------------------------------------------------------------
-def panel_svg(u):
+def panel_svg(u, sample=True):
     h = u["panel"]["h"]
     o = []
     # Brand block + enamel unit plate.
@@ -387,7 +392,15 @@ def panel_svg(u):
     o.append(text(L["x"] - 22, L["y"] + 4, "LINK", 8, INK_DIM, 600, "end", 1.8))
     for i in range(5):
         o.append(text(L["x"] + i * L["dx"], L["y"] + 25, f"0{i + 1}", 8, INK, 700, "middle", 0.8))
-    o.append(text(W / 2, h - 18, f"DESIGNED BY SEVENTHWELL  ·  SERIAL 600-{u['number']}001", 7.5, INK_DIM, 600, "middle", 2.0))
+    if sample:
+        # Live instance counts are drawn by the app; the sample bakes the same marks.
+        for i, c in enumerate(L["count"]):
+            if c > 1:
+                o.append(f'<text x="{L["x"] + i * L["dx"] + 6:.1f}" y="{L["y"] - 7:.1f}" font-size="7.5" fill="{AMBER}" '
+                         f'font-weight="800" font-family="{FONT}">\u00d7{c}</text>')
+    if sample:
+        # In the app this line is the live status read-out, drawn by Qt.
+        o.append(text(W / 2, h - 18, f"DESIGNED BY SEVENTHWELL  ·  SERIAL 600-{u['number']}001", 7.5, INK_DIM, 600, "middle", 2.0))
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{h}" viewBox="0 0 {W} {h}">'
             + "".join(o) + "</svg>")
 
@@ -757,6 +770,8 @@ def main():
         write(f"face_{kind}", face_svg(kind), FACE_W, FACE_H, 4)
     for num, u in UNITS.items():
         write(f"unit{num}_decal", panel_svg(u), W, u["panel"]["h"], 3)
+        # Static print for the app background: no serial line, no live LINK counts.
+        write(f"unit{num}_decal_static", panel_svg(u, sample=False), W, u["panel"]["h"], 3)
         for d in u["displays"]:
             write(f"unit{num}_seg_{d['id']}", seg_svg(d), d["w"], d["h"], 6)
         for i, v in enumerate(u["vus"]):

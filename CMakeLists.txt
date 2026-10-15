@@ -70,6 +70,7 @@ set(MODEL600_SOURCES
     src/plugin-main.cpp
     src/audio-filter.cpp
     src/custom-ui-dialog.cpp
+    src/hw-panel.cpp
     src/ui-widgets.cpp)
 
 set(MODEL600_HEADERS
@@ -80,6 +81,7 @@ set(MODEL600_HEADERS
     src/update-checker.hpp
     src/os-conflict-shield.hpp
     src/custom-ui-dialog.hpp
+    src/hw-panel.hpp
     src/ui-theme.hpp
     src/ui-widgets.hpp)
 
@@ -104,6 +106,18 @@ set(MODEL600_UI_RESOURCES
     resources/parts/key_active.png
     resources/parts/key_danger.png
     resources/parts/key_primary.png)
+
+# GUI v2 hardware faceplates (docs/design/v2): Blender backgrounds, knob
+# filmstrips and part sprites, packed by docs/design/v2/pack_assets.py, which
+# also writes the file list. Served as :/m600/hw/...
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/hw/FILES.txt")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/resources/hw/FILES.txt" MODEL600_HW_FILES)
+    list(TRANSFORM MODEL600_HW_FILES PREPEND "resources/")
+    list(APPEND MODEL600_UI_RESOURCES ${MODEL600_HW_FILES})
+else()
+    message(WARNING "resources/hw/FILES.txt is missing: run docs/design/v2/pack_assets.py. "
+                    "The console will fall back to plain drawing.")
+endif()
 
 if(WIN32)
     list(APPEND MODEL600_SOURCES src/voice-command-win.cpp)
@@ -181,6 +195,8 @@ if(MODEL600_BUILD_GUI_SAMPLES)
         tools/gui_samples/render_gui_samples.cpp
         src/custom-ui-dialog.cpp
         src/custom-ui-dialog.hpp
+        src/hw-panel.cpp
+        src/hw-panel.hpp
         src/ui-widgets.cpp
         src/ui-widgets.hpp)
     target_include_directories(m600_render_gui_samples PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
