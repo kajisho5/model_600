@@ -112,7 +112,7 @@ private:
 // -----------------------------------------------------------------------------
 //  FNV-1a (64-bit) used for the fast offline integrity tag.
 // -----------------------------------------------------------------------------
-inline std::uint64_t fnv1a64(const QByteArray& in, std::uint64_t seed = 1469598103934665603ull) noexcept {
+inline std::uint64_t fnv1a64(const QByteArray& in, std::uint64_t seed = 0xcbf29ce484222325ULL) noexcept {
     std::uint64_t h = seed;
     for (char c : in) { h ^= static_cast<std::uint8_t>(c); h *= 1099511628211ull; }
     return h;

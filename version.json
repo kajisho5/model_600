@@ -1,0 +1,23 @@
+{
+  "product": "MODEL600",
+  "name": "MODEL 600 // BROADCAST SUITE",
+  "vendor": "SEVENTHWELL",
+  "latest": "1.0.0",
+  "min_supported": "1.0.0",
+  "released": "2026-10-15",
+  "url": "https://www.seventhwell.com/model600/download",
+  "notes": "Initial public release. 5 cooperating units, 16-slot shared bus, BS.1770-4 metering, 10-second cue-card auto calibration, multilingual voice director.",
+  "channels": {
+    "stable": {
+      "version": "1.0.0",
+      "windows": {
+        "url": "https://cdn.seventhwell.com/model600/MODEL600-1.0.0-windows-x64.zip",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "macos": {
+        "url": "https://cdn.seventhwell.com/model600/MODEL600-1.0.0-macos-universal.pkg",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  }
+}
