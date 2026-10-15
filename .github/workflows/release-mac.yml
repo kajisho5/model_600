@@ -1,7 +1,9 @@
 # Mac 版の配布物を作る：ビルド → Developer ID 署名 → Apple の公証 → .dmg（Mac 不要。kajisho5/runway の mac-notarize を使う）
 # 実行：Actions → release-mac → Run workflow（iPhone の GitHub アプリからも可）、または v1.0.0 などのタグを push
 # 公証済みの .dmg は実行結果の Artifacts からダウンロードする。
-# ※ プラグイン本体のコードができたら、build と products を実際の構成に合わせる（今は JUCE + CMake を想定）
+# ビルド：tools/ci/build_macos_release.sh（OBS 31.1.1 SDK → Pro 版、Universal2、macOS 12 以上）
+#   → dist-mac/model600.plugin を runway が Developer ID で署名し直す。同じビルドは build.yml の
+#   macos-release ジョブ（Xcode 26）で PR ごとに確認している。
 name: release-mac
 
 on:
@@ -17,12 +19,8 @@ jobs:
     uses: kajisho5/runway/.github/workflows/mac-notarize.yml@main
     with:
       name: model_600
-      build: >-
-        cmake -B build -G Xcode
-        -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
-        && cmake --build build --config Release --parallel
+      build: bash tools/ci/build_macos_release.sh
       products: |
-        build/**/Release/VST3/*.vst3
-        build/**/Release/AU/*.component
+        dist-mac/model600.plugin
+      readme: packaging/macos/README.txt
     secrets: inherit

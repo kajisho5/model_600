@@ -12,8 +12,9 @@ Mac 向けの配布物は **Developer ID 署名 ＋ Apple の公証（notarizati
 ### コードを書いたら必ずやること
 
 1. `release-mac.yml` の `build` と `products` を実際のビルド構成に合わせる
-   - 今の想定は JUCE ＋ CMake、Universal（`arm64;x86_64`）、macOS 11.0 以上
-   - JUCE の成果物の場所は `build/<Target>_artefacts/Release/VST3/*.vst3` と `.../AU/*.component`。Standalone も配るなら `.../Standalone/*.app` を `products` に足す
+   - 今の構成：OBS プラグイン（CMake ＋ Qt6 ＋ OBS 31.1.1 SDK）、Universal（`arm64;x86_64`）、macOS 12.0 以上
+   - `build: bash tools/ci/build_macos_release.sh` → 成果物は `dist-mac/model600.plugin`（Pro 版。音声モデルと THIRD_PARTY_NOTICES.md を Contents/Resources に同梱）
+   - ビルドを変えたら `build.yml` の `macos-release` ジョブ（同じスクリプトを Xcode 26 で実行）が通ることを確認する
    - `products` は glob（`**` 可）。1 行でも当たらないとエラーで止まる
 2. hardened runtime で動くようにする。マイク入力を使う Standalone などで entitlements が要る場合は、リポに `.entitlements` を置き、`release-mac.yml` に `entitlements: <パス>` を足す
 3. dmg に同梱するインストール説明が要るなら、テキストを置いて `readme: <パス>` を足す
