@@ -1,0 +1,23 @@
+# Build output
+/build/
+/build-*/
+/out/
+/dist-mac/
+/.cache/
+*.o
+*.obj
+moc_*.cpp
+model600.so
+model600.dll
+*.plugin
+
+# Generated licence artefacts (never commit real keys)
+keys_*.json
+keys_*.csv
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.user
+compile_commands.json

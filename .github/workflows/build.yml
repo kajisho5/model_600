@@ -1,0 +1,234 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.edition }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [pro, standard]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake g++ qt6-base-dev libobs-dev \
+            fonts-ipafont-gothic fonts-noto-color-emoji
+
+      - name: Cache voice model
+        if: matrix.edition == 'pro'
+        uses: actions/cache@v4
+        with:
+          path: build/models
+          key: whisper-model-${{ hashFiles('cmake/whisper.cmake') }}
+
+      # Pro also builds the embedded recognizer (the macOS voice engine) and
+      # runs its end-to-end test on recorded command clips.
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DMODEL600_BUILD_TESTS=ON
+          -DMODEL600_BUILD_GUI_SAMPLES=ON
+          -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
+          -DMODEL600_WHISPER_TESTS=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Python tools sanity
+        run: python3 setup_project.py --verify
+
+      - name: Render GUI samples
+        if: matrix.edition == 'pro'
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_SCALE_FACTOR: '2'
+        run: ./build/m600_render_gui_samples gui-samples-out
+
+      - name: Upload GUI samples
+        if: matrix.edition == 'pro'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-samples
+          path: gui-samples-out/*.png
+
+  # Windows (MSVC) and macOS (Apple Clang, Universal2): the full OBS plugin.
+  # The libobs + obs-frontend-api SDK is built from the obs-studio sources with
+  # the official obs-deps, as obsproject/obs-plugintemplate does
+  # (tools/ci/obs_sdk.cmake), and cached. Every OBS-independent source is also
+  # compiled with warnings as errors, then the tests and the real GUI run.
+  desktop:
+    name: ${{ matrix.os_name }} (${{ matrix.edition }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, os_name: Windows MSVC, edition: pro }
+          - { os: windows-2022, os_name: Windows MSVC, edition: standard }
+          - { os: macos-15, os_name: macOS Universal2, edition: pro }
+          - { os: macos-15, os_name: macOS Universal2, edition: standard }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Paths
+        shell: bash
+        run: |
+          # One forward-slash path usable by CMake, MSVC tools and bash alike.
+          root="$(cd "$GITHUB_WORKSPACE/.." && pwd)/obs-sdk"
+          if [ "$RUNNER_OS" = "Windows" ]; then root="$(cygpath -m "$root")"; fi
+          echo "OBS_SDK=$root" >> "$GITHUB_ENV"
+
+      - name: Cache voice model
+        if: runner.os == 'macOS' && matrix.edition == 'pro'
+        uses: actions/cache@v4
+        with:
+          path: build/models
+          key: whisper-model-${{ hashFiles('cmake/whisper.cmake') }}
+
+      - name: Cache OBS SDK
+        id: obs-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.OBS_SDK }}
+          key: obs-sdk-${{ runner.os }}-${{ hashFiles('tools/ci/obs_sdk.cmake') }}
+
+      - name: Build OBS SDK (libobs + obs-frontend-api)
+        if: steps.obs-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: cmake -DOUT="$OBS_SDK" -P tools/ci/obs_sdk.cmake
+
+      - name: Configure
+        shell: bash
+        run: |
+          EXTRA=""
+          PREFIX="$OBS_SDK/sdk;$OBS_SDK/deps;$OBS_SDK/qt6"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"
+            # libobs installs as sdk/Frameworks/libobs.framework on macOS.
+            PREFIX="$PREFIX;$OBS_SDK/sdk/Frameworks"
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA \
+            "-DCMAKE_PREFIX_PATH=$PREFIX" \
+            -DMODEL600_BUILD_PLUGIN=ON \
+            -DMODEL600_BUILD_PORTABLE_CHECK=ON \
+            -DMODEL600_BUILD_TESTS=ON \
+            -DMODEL600_BUILD_GUI_SAMPLES=ON \
+            -DMODEL600_WHISPER_TESTS=${{ (runner.os == 'macOS' && matrix.edition == 'pro') && 'ON' || 'OFF' }} \
+            -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: bash
+        run: |
+          # Install layout = what the user copies into OBS.
+          cmake --install build --config Release --prefix pkg --component model600
+          name="model600-${{ runner.os }}-${{ matrix.edition }}"
+          mkdir -p dist
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            bin=pkg/model600.plugin/Contents/MacOS/model600
+            lipo -info "$bin" build/m600_test_dsp
+            file "$bin" | grep -q "bundle" || { echo "not an MH_BUNDLE"; exit 1; }
+            plutil -lint pkg/model600.plugin/Contents/Info.plist
+            # No Accelerate "new LAPACK" imports (macOS 13.3+ only); minimum OS stays 12.0.
+            if nm -um "$bin" | grep -q NEWLAPACK; then echo "NEWLAPACK symbols imported"; exit 1; fi
+            otool -l "$bin" | grep -A3 LC_BUILD_VERSION | grep minos
+            model=pkg/model600.plugin/Contents/Resources/ggml-base-q5_1.bin
+            if [ "${{ matrix.edition }}" = "pro" ]; then
+              echo "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898  $model" | shasum -a 256 -c
+            elif [ -e "$model" ]; then
+              echo "Standard must not ship the voice model"; exit 1
+            fi
+            plutil -p pkg/model600.plugin/Contents/Info.plist
+            # Ad-hoc signature over the whole bundle (no Developer ID yet).
+            codesign --force --sign - pkg/model600.plugin
+            codesign --verify --strict --verbose=2 pkg/model600.plugin
+            cp install_mac.command THIRD_PARTY_NOTICES.md pkg/
+            (cd pkg && ditto -c -k --keepParent model600.plugin "../dist/$name.zip" \
+              && zip -q "../dist/$name.zip" install_mac.command THIRD_PARTY_NOTICES.md)
+          else
+            ls -l pkg/obs-plugins/64bit/model600.dll
+            cp THIRD_PARTY_NOTICES.md pkg/
+            (cd pkg && 7z a -tzip "../dist/$name.zip" obs-plugins THIRD_PARTY_NOTICES.md >/dev/null)
+          fi
+          unzip -l "dist/$name.zip"
+
+      - name: Render GUI samples
+        if: matrix.edition == 'pro'
+        shell: bash
+        env:
+          QT_SCALE_FACTOR: '2'
+        run: |
+          sdk="$OBS_SDK"
+          if [ "$RUNNER_OS" = "Windows" ]; then sdk="$(cygpath -u "$OBS_SDK")"; fi
+          export PATH="$sdk/qt6/bin:$sdk/deps/bin:$PATH"
+          export QT_PLUGIN_PATH="$OBS_SDK/qt6/plugins"
+          # Prefer the headless platform plugin when the obs-deps Qt ships it.
+          if ls "$sdk"/qt6/plugins/platforms/*offscreen* >/dev/null 2>&1; then export QT_QPA_PLATFORM=offscreen; fi
+          if [ -f build/Release/m600_render_gui_samples.exe ]; then
+            ./build/Release/m600_render_gui_samples.exe gui-samples-out
+          else
+            ./build/m600_render_gui_samples gui-samples-out
+          fi
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: model600-${{ runner.os }}-${{ matrix.edition }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload GUI samples
+        if: matrix.edition == 'pro'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-samples-${{ runner.os }}
+          path: gui-samples-out/*.png
+
+  # The exact build kajisho5/runway's mac-notarize runs before Developer ID
+  # signing (tools/ci/build_macos_release.sh, runway's default Xcode 26), with
+  # an ad-hoc hardened-runtime signature standing in for the real one.
+  macos-release:
+    name: macOS release build (runway, Xcode 26)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        shell: bash
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -vi beta | sort -V | tail -n 1 || true)
+          if [ -z "$x" ]; then echo "Xcode 26 is not on this runner:"; ls -d /Applications/Xcode*.app; exit 1; fi
+          sudo xcode-select -s "$x/Contents/Developer"
+          xcodebuild -version
+
+      - name: Cache OBS SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/obs-sdk
+          key: obs-sdk-macOS-xcode26-${{ hashFiles('tools/ci/obs_sdk.cmake') }}
+
+      - name: Build (same command as release-mac)
+        run: bash tools/ci/build_macos_release.sh
+
+      - name: Sign like runway (ad-hoc stand-in)
+        run: |
+          codesign --force --timestamp=none --options runtime --sign - dist-mac/model600.plugin
+          codesign --verify --strict --deep --verbose=2 dist-mac/model600.plugin
+          codesign -dvv dist-mac/model600.plugin 2>&1 | grep -E "flags|Format"
