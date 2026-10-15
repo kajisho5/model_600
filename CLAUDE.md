@@ -21,7 +21,8 @@ Mac 向けの配布物は **Developer ID 署名 ＋ Apple の公証（notarizati
 
 ### 実行のしかた
 
-- このリポの Actions → **release-mac** → Run workflow（iPhone の GitHub アプリからも可）。公証済みの dmg は実行結果の Artifacts に出る
+- **現状は runway 側から実行する**：runway の Actions → **mac-release** → Run workflow。入力は repo `kajisho5/model_600`、ref `main`（またはタグ）、build `bash tools/ci/build_macos_release.sh`、products `dist-mac/model600.plugin`。公証済みの dmg は runway 側の実行結果の Artifacts に出る
+- このリポの Actions → release-mac は今は動かない（2026/10/16 に実行して「workflow was not found」）。GitHub の仕様で、private リポ（runway）の再利用ワークフローは **private リポからしか呼べない**（"Access is allowed only from private repositories" — docs.github.com「Managing GitHub Actions settings for a repository」の Access 節）。このリポは public なので呼べない。runway 側の方針を変えるまでは上の runway 実行を使う
 - タグ（`v1.0.0` など）を push しても実行され、dmg 名にバージョンが入る
 - 必要な Secrets（`ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_P8_BASE64` / `APPLE_TEAM_ID` / `MATCH_GIT_TOKEN`）は runway の sync-secrets が配布済み。このリポで手動登録・変更しない
 - このリポは public なので Actions の macOS ランナーは無料

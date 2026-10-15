@@ -274,6 +274,25 @@ if(MODEL600_BUILD_TESTS)
     target_include_directories(m600_test_voice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME voice COMMAND m600_test_voice)
 
+    # Loads the built plugin into the real libobs (headless Qt), like OBS does.
+    if(MODEL600_BUILD_PLUGIN AND UNIX AND NOT APPLE)
+        add_executable(m600_test_obs_load tests/test_obs_load.cpp)
+        find_package(X11 REQUIRED)
+        target_link_libraries(m600_test_obs_load PRIVATE OBS::libobs Qt6::Widgets X11::X11)
+        add_dependencies(m600_test_obs_load model600)
+        if(MODEL600_PRO_EDITION)
+            set(m600_expected_filters 5)
+        else()
+            set(m600_expected_filters 4)
+        endif()
+        set(m600_obs_dir "${CMAKE_CURRENT_BINARY_DIR}/obs-load-test")
+        file(MAKE_DIRECTORY "${m600_obs_dir}/data" "${m600_obs_dir}/config")
+        # Needs an X display: CI runs ctest under xvfb-run.
+        add_test(NAME obs_load COMMAND m600_test_obs_load $<TARGET_FILE:model600>
+                 "${m600_obs_dir}/data" "${m600_obs_dir}/config" ${m600_expected_filters})
+        set_tests_properties(obs_load PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    endif()
+
     if(MODEL600_WHISPER_TESTS)
         add_executable(m600_test_whisper tests/test_whisper.cpp src/voice-whisper.cpp)
         target_include_directories(m600_test_whisper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

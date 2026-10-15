@@ -4,6 +4,8 @@
 # ビルド：tools/ci/build_macos_release.sh（OBS 31.1.1 SDK → Pro 版、Universal2、macOS 12 以上）
 #   → dist-mac/model600.plugin を runway が Developer ID で署名し直す。同じビルドは build.yml の
 #   macos-release ジョブ（Xcode 26）で PR ごとに確認している。
+# ※ 現状このリポ（public）からは runway（private）の再利用ワークフローを呼べない（GitHub の仕様）。
+#    runway の Actions → mac-release を使う（手順は CLAUDE.md）。
 name: release-mac
 
 on:
