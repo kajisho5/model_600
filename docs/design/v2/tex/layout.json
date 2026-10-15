@@ -74,11 +74,18 @@
           "cy": 172,
           "w": 320,
           "h": 184,
-          "face_w": 284,
-          "face_h": 148,
-          "face": "vu",
-          "needle": -1.0,
-          "caption": "OUTPUT LEVEL"
+          "caption": "OUTPUT LEVEL",
+          "digi": {
+            "kind": "level",
+            "value": "-13.6",
+            "bar": -13.6,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": "PEAK  -1.2 dBTP",
+            "target": null,
+            "win_w": 292,
+            "win_h": 156
+          }
         }
       ],
       "knobs_big": [
@@ -312,22 +319,36 @@
           "cy": 160,
           "w": 220,
           "h": 152,
-          "face_w": 184,
-          "face_h": 96,
-          "face": "vu",
-          "needle": -5.0,
-          "caption": "GUEST LEVEL"
+          "caption": "GUEST LEVEL",
+          "digi": {
+            "kind": "level",
+            "value": "-16.8",
+            "bar": -16.8,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": "TARGET -14.5",
+            "target": -14.5,
+            "win_w": 192,
+            "win_h": 124
+          }
         },
         {
           "cx": 736,
           "cy": 160,
           "w": 220,
           "h": 152,
-          "face_w": 184,
-          "face_h": 96,
-          "face": "ride",
-          "needle": -3.5,
-          "caption": "AUTO RIDE"
+          "caption": "AUTO RIDE",
+          "digi": {
+            "kind": "ride",
+            "value": "-3.5",
+            "bar": -3.5,
+            "label": "CUT  /  BOOST",
+            "unit": "dB",
+            "aux": null,
+            "target": null,
+            "win_w": 192,
+            "win_h": 124
+          }
         }
       ],
       "knobs_big": [
@@ -511,11 +532,18 @@
           "cy": 172,
           "w": 320,
           "h": 184,
-          "face_w": 284,
-          "face_h": 148,
-          "face": "vu",
-          "needle": 0.6,
-          "caption": "GAME OUTPUT"
+          "caption": "GAME OUTPUT",
+          "digi": {
+            "kind": "level",
+            "value": "-9.8",
+            "bar": -9.8,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": "PEAK  -0.6 dBTP",
+            "target": null,
+            "win_w": 292,
+            "win_h": 156
+          }
         }
       ],
       "knobs_big": [
@@ -719,11 +747,18 @@
           "cy": 172,
           "w": 320,
           "h": 184,
-          "face_w": 284,
-          "face_h": 148,
-          "face": "vu",
-          "needle": -7.0,
-          "caption": "BGM LEVEL"
+          "caption": "BGM LEVEL",
+          "digi": {
+            "kind": "level",
+            "value": "-24.5",
+            "bar": -24.5,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": "PEAK  -12.1 dBTP",
+            "target": null,
+            "win_w": 292,
+            "win_h": 156
+          }
         }
       ],
       "knobs_big": [
@@ -933,11 +968,18 @@
           "cy": 290,
           "w": 216,
           "h": 148,
-          "face_w": 180,
-          "face_h": 94,
-          "face": "vu",
-          "needle": -2.0,
           "caption": "",
+          "digi": {
+            "kind": "level",
+            "value": "-13.9",
+            "bar": -13.9,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": null,
+            "target": null,
+            "win_w": 188,
+            "win_h": 120
+          },
           "chan": {
             "number": "01",
             "name": "VOCAL"
@@ -948,11 +990,18 @@
           "cy": 290,
           "w": 216,
           "h": 148,
-          "face_w": 180,
-          "face_h": 94,
-          "face": "vu",
-          "needle": -6.0,
           "caption": "",
+          "digi": {
+            "kind": "level",
+            "value": "-17.2",
+            "bar": -17.2,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": null,
+            "target": null,
+            "win_w": 188,
+            "win_h": 120
+          },
           "chan": {
             "number": "02",
             "name": "COLLAB"
@@ -963,11 +1012,18 @@
           "cy": 290,
           "w": 216,
           "h": 148,
-          "face_w": 180,
-          "face_h": 94,
-          "face": "vu",
-          "needle": -4.0,
           "caption": "",
+          "digi": {
+            "kind": "level",
+            "value": "-15.4",
+            "bar": -15.4,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": null,
+            "target": null,
+            "win_w": 188,
+            "win_h": 120
+          },
           "chan": {
             "number": "03",
             "name": "GAME"
@@ -978,11 +1034,18 @@
           "cy": 290,
           "w": 216,
           "h": 148,
-          "face_w": 180,
-          "face_h": 94,
-          "face": "vu",
-          "needle": -11.0,
           "caption": "",
+          "digi": {
+            "kind": "level",
+            "value": "-26.0",
+            "bar": -26.0,
+            "label": "SHORT-TERM",
+            "unit": "LUFS",
+            "aux": null,
+            "target": null,
+            "win_w": 188,
+            "win_h": 120
+          },
           "chan": {
             "number": "04",
             "name": "BGM"
@@ -993,11 +1056,18 @@
           "cy": 540,
           "w": 168,
           "h": 104,
-          "face_w": 132,
-          "face_h": 69,
-          "face": "phase",
-          "needle": 0.62,
-          "caption": "PHASE"
+          "caption": "PHASE",
+          "digi": {
+            "kind": "phase",
+            "value": "0.62",
+            "bar": 0.62,
+            "label": "CORRELATION",
+            "unit": "",
+            "aux": null,
+            "target": null,
+            "win_w": 140,
+            "win_h": 76
+          }
         }
       ],
       "knobs_big": [],

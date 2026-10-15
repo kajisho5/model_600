@@ -240,6 +240,48 @@ def mat_image(name, path, emission_strength=0.0, rough=0.5, decal=False):
     return m
 
 
+def mat_screen(name, path, strength=1.2):
+    """Self-lit display: pure emission from the texture (no BSDF, so no sampling noise)."""
+    if name in IMAGES:
+        return IMAGES[name]
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        if n.type != "OUTPUT_MATERIAL":
+            nt.nodes.remove(n)
+    tx = nt.nodes.new("ShaderNodeTexImage")
+    tx.image = bpy.data.images.load(path)
+    tx.interpolation = "Cubic"
+    em = nt.nodes.new("ShaderNodeEmission")
+    em.inputs["Strength"].default_value = strength
+    nt.links.new(tx.outputs["Color"], em.inputs["Color"])
+    nt.links.new(em.outputs["Emission"], nt.nodes["Material Output"].inputs["Surface"])
+    IMAGES[name] = m
+    return m
+
+
+def mat_thin_glass():
+    """Cover glass over a display: clear transmission plus a Fresnel-weighted reflection."""
+    m = bpy.data.materials.new("ThinGlass")
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        if n.type != "OUTPUT_MATERIAL":
+            nt.nodes.remove(n)
+    tr = nt.nodes.new("ShaderNodeBsdfTransparent")
+    gl = nt.nodes.new("ShaderNodeBsdfGlossy")
+    gl.inputs["Roughness"].default_value = 0.04
+    fr = nt.nodes.new("ShaderNodeFresnel")
+    fr.inputs["IOR"].default_value = 1.5
+    mix = nt.nodes.new("ShaderNodeMixShader")
+    nt.links.new(fr.outputs["Fac"], mix.inputs["Fac"])
+    nt.links.new(tr.outputs["BSDF"], mix.inputs[1])
+    nt.links.new(gl.outputs["BSDF"], mix.inputs[2])
+    nt.links.new(mix.outputs["Shader"], nt.nodes["Material Output"].inputs["Surface"])
+    return m
+
+
 # ---- Geometry helpers --------------------------------------------------------------
 def link(o):
     if o.name not in bpy.context.scene.collection.objects:
@@ -338,6 +380,7 @@ def materials():
     M["bezel"] = mat_principled("Bezel", "#101113", metallic=0.2, rough=0.45, coat=0.3)
     M["glass"] = mat_principled("Glass", "#FFFFFF", rough=0.03, transmission=1.0, ior=1.45, spec=0.5)
     M["needle"] = mat_principled("Needle", "#101010", rough=0.5)
+    M["thin_glass"] = mat_thin_glass()
     M["recess"] = mat_principled("Recess", "#050506", rough=0.8)
     M["rack"] = mat_principled("Rack", "#141518", metallic=0.6, rough=0.5)
     # Illuminated caps: frosted lenses. Off = dim tinted glass, on = saturated glow.
@@ -500,9 +543,9 @@ def seg_display(num, d, z0):
     frame = box(((w + 16) * S, (h + 16) * S, 0.12), P(cx, cy, z0 + 0.06), M["bezel"], bevel=0.03)
     hole = box((w * S, h * S, 0.5), P(cx, cy, z0 + 0.1))
     boolean_cut(frame, hole)
-    mat = mat_image(f"Seg{num}{d['id']}", os.path.join(TEX, f"unit{num}_seg_{d['id']}.png"), emission_strength=1.6, rough=0.4)
+    mat = mat_screen(f"Seg{num}{d['id']}", os.path.join(TEX, f"unit{num}_seg_{d['id']}.png"), 1.15)
     plane(w * S, h * S, P(cx, cy, z0 + 0.01), mat)
-    plane(w * S, h * S, P(cx, cy, z0 + 0.09), M["glass"])
+    plane(w * S, h * S, P(cx, cy, z0 + 0.09), M["thin_glass"])
 
 
 def deflection(kind, value):
@@ -511,6 +554,19 @@ def deflection(kind, value):
     if kind == "ride":
         return 46 * value / 12
     return 46 * value
+
+
+def digital_meter(num, idx, v, z0):
+    """Digital meter: black bezel, recessed emissive window (7-segment value + LED bar), glass."""
+    cx, cy, w, h = v["cx"], v["cy"], v["w"], v["h"]
+    m = v["digi"]
+    ww, wh = m["win_w"], m["win_h"]
+    frame = box((w * S, h * S, 0.14), P(cx, cy, z0 + 0.07), M["bezel"], bevel=0.03)
+    hole = box((ww * S, wh * S, 0.5), P(cx, cy, z0 + 0.1))
+    boolean_cut(frame, hole)
+    mat = mat_screen(f"Meter{num}_{idx}", os.path.join(TEX, f"unit{num}_meter_{idx}.png"), 1.15)
+    plane(ww * S, wh * S, P(cx, cy, z0 + 0.01), mat)
+    plane(ww * S, wh * S, P(cx, cy, z0 + 0.11), M["thin_glass"])
 
 
 def vu_meter(v, z0):
@@ -552,8 +608,11 @@ def build_unit(num, origin=(0.0, 0.0, 0.0)):
     u = UNITS[num]
     set_frame(u["panel"]["w"], u["panel"]["h"], origin)
     faceplate(num, u)
-    for v in u["vus"]:
-        vu_meter(v, 0.0)
+    for i, v in enumerate(u["vus"]):
+        if "digi" in v:
+            digital_meter(num, i, v, 0.0)
+        else:
+            vu_meter(v, 0.0)
     for k in u["knobs_big"]:
         a = -SWEEP + (k["value"] - k["min"]) / (k["max"] - k["min"]) * 2 * SWEEP
         knob_machined(k["cx"], k["cy"], k["r"], a, 0.0)

@@ -67,14 +67,30 @@ def output_trim():
 
 
 def vu(cx, cy, w, h, face, needle, caption):
+    """Analogue VU meter (kept for reference; the current design uses digi())."""
     k = (w - 36) / FACE_W
     return {"cx": cx, "cy": cy, "w": w, "h": h, "face_w": round(FACE_W * k), "face_h": round(FACE_H * k),
             "face": face, "needle": needle, "caption": caption}
 
 
+DIGI_BEZEL = 14                    # Bezel border around a digital meter window (px).
+
+
+def digi(cx, cy, w, h, caption, kind, value, bar, label, unit, aux=None, target=None):
+    """Digital meter window: what it measures, a big 7-segment number and a segment bar.
+
+    kind: "level" (-36..0, green/amber/red), "ride" (-12..+12, centre zero), "phase" (-1..+1, centre zero).
+    """
+    return {"cx": cx, "cy": cy, "w": w, "h": h, "caption": caption,
+            "digi": {"kind": kind, "value": value, "bar": bar, "label": label, "unit": unit,
+                     "aux": aux, "target": target,
+                     "win_w": w - 2 * DIGI_BEZEL, "win_h": h - 2 * DIGI_BEZEL}}
+
+
 def unit01():
     u = common("01", "VOCAL MASTER", "BROADCAST LEVELING AMPLIFIER")
-    u["vus"] = [vu(550, 172, 320, 184, "vu", -1.0, "OUTPUT LEVEL")]
+    u["vus"] = [digi(550, 172, 320, 184, "OUTPUT LEVEL", "level", "-13.6", -13.6, "SHORT-TERM", "LUFS",
+                     aux="PEAK  -1.2 dBTP")]
     u["knobs_big"] = [big("input", 166, 312, 54, "INPUT GAIN", "dB", -18, 24, [-18, -12, -6, 0, 6, 12, 18, 24], 3, 3.5),
                       output_trim()]
     u["knobs_step"] = [
@@ -101,8 +117,9 @@ def unit02():
     # Story: you talk -> the guest is dipped; otherwise the guest is ridden to the target.
     u = common("02", "COLLAB RIDER", "GUEST VOICE AUTO-RIDER",
                links={"x": 908, "y": 186, "dx": 30, "lit": [True] * 5})
-    u["vus"] = [vu(500, 160, 220, 152, "vu", -5.0, "GUEST LEVEL"),
-                vu(736, 160, 220, 152, "ride", -3.5, "AUTO RIDE")]
+    u["vus"] = [digi(500, 160, 220, 152, "GUEST LEVEL", "level", "-16.8", -16.8, "SHORT-TERM", "LUFS",
+                     aux="TARGET -14.5", target=-14.5),
+                digi(736, 160, 220, 152, "AUTO RIDE", "ride", "-3.5", -3.5, "CUT  /  BOOST", "dB")]
     u["knobs_big"] = [
         big("target", 166, 312, 54, "TARGET LOUDNESS", "LUFS", -24, -8, [-24, -20, -16, -12, -8], 2, -14.5),
         big("duck", 372, 324, 42, "DUCK WHEN I TALK", "dB", -12, 0, [-12, -9, -6, -3, 0], 1.5, -3.5, label_y=426),
@@ -118,7 +135,8 @@ def unit02():
 
 def unit03():
     u = common("03", "GAME IMPACT", "GAME AUDIO IMPACT LIMITER")
-    u["vus"] = [vu(550, 172, 320, 184, "vu", 0.6, "GAME OUTPUT")]
+    u["vus"] = [digi(550, 172, 320, 184, "GAME OUTPUT", "level", "-9.8", -9.8, "SHORT-TERM", "LUFS",
+                     aux="PEAK  -0.6 dBTP")]
     u["knobs_big"] = [
         big("ceiling", 166, 312, 54, "IMPACT CEILING", "dB", -12, 0, [-12, -9, -6, -3, 0], 1.5, -6.0),
         big("scoop", 366, 324, 42, "VOICE SCOOP", "dB", -12, 0, [-12, -9, -6, -3, 0], 1.5, -5.0, label_y=426),
@@ -136,7 +154,8 @@ def unit03():
 
 def unit04():
     u = common("04", "BGM POCKET", "MUSIC BED AUTO-DUCKER")
-    u["vus"] = [vu(550, 172, 320, 184, "vu", -7.0, "BGM LEVEL")]
+    u["vus"] = [digi(550, 172, 320, 184, "BGM LEVEL", "level", "-24.5", -24.5, "SHORT-TERM", "LUFS",
+                     aux="PEAK  -12.1 dBTP")]
     u["knobs_big"] = [
         big("pocket", 166, 312, 54, "POCKET DEPTH", "dB", -12, 0, [-12, -9, -6, -3, 0], 1.5, -8.5),
         output_trim(),
@@ -165,10 +184,10 @@ def unit05():
         {"id": "s", "cx": 640, "cy": 96, "w": 112, "h": 56, "text": "-14.1", "label": "SHORT-TERM"},
         {"id": "i", "cx": 806, "cy": 96, "w": 152, "h": 56, "text": "-14.2", "label": "INTEGRATED  LUFS"},
     ]
-    names = [("01", "VOCAL", -2.0), ("02", "COLLAB", -6.0), ("03", "GAME", -4.0), ("04", "BGM", -11.0)]
-    for i, (num, nm, needle) in enumerate(names):
+    names = [("01", "VOCAL", "-13.9"), ("02", "COLLAB", "-17.2"), ("03", "GAME", "-15.4"), ("04", "BGM", "-26.0")]
+    for i, (num, nm, val) in enumerate(names):
         cx = 178 + 248 * i
-        u["vus"].append(vu(cx, 290, 216, 148, "vu", needle, ""))
+        u["vus"].append(digi(cx, 290, 216, 148, "", "level", val, float(val), "SHORT-TERM", "LUFS"))
         u["vus"][-1]["chan"] = {"number": num, "name": nm}
         u["knobs_trim"].append({"cx": cx + 72, "cy": 418, "r": 17, "label": "TRIM", "value": 0.0, "min": -12, "max": 12})
     u["target"] = {"title": "YOUTUBE TARGET  -12 \u00b11.5 LUFS", "x": 96, "y": 506}
@@ -177,7 +196,7 @@ def unit05():
         {"cx": 190, "cy": 544, "color": "green", "lit": True, "label": "IN RANGE"},
         {"cx": 260, "cy": 544, "color": "red", "lit": False, "label": "HIGH"},
     ]
-    u["vus"].append(vu(420, 540, 168, 104, "phase", 0.62, "PHASE"))
+    u["vus"].append(digi(420, 540, 168, 104, "PHASE", "phase", "0.62", 0.62, "CORRELATION", ""))
     u["knobs_step"] = [{"id": "scene", "cx": 604, "cy": 548, "r": 26, "label": "SCENE",
                         "positions": ["FPS", "TALK", "SING", "ASMR"], "spread": 75, "value": 1}]
     u["buttons"] = [
@@ -474,60 +493,142 @@ SEGS = {"0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc", "5": 
         "7": "abc", "8": "abcdefg", "9": "abcfgd", "-": "g", " ": ""}
 
 
-def seg_svg(d):
-    w, h = d["w"], d["h"]
-    lit, ghost, bg = "#FFB347", "#22160B", "#0B0806"
+DIGI_LIT, DIGI_GHOST, DIGI_BG, DIGI_DIM = "#FFB347", "#1A1108", "#0B0806", "#B07A35"
+LED = {"green": ("#57E08A", "#0E1F14"), "amber": ("#FFB347", "#23170A"), "red": ("#FF4A3A", "#260C0A")}
+
+
+def split_chars(txt):
     chars = []
-    for ch in d["text"]:
+    for ch in txt:
         if ch == "." and chars:
             chars[-1] = (chars[-1][0], True)
         else:
             chars.append((ch, False))
-    n = len(chars)
-    cw = (w - 16) / n
-    ch_h = h - 18
-    t = max(3.0, cw * 0.16)                 # Segment thickness.
-    sk = 0.10                               # Italic skew.
-    o = [f'<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%">'
-         f'<feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/>'
-         f'<feMergeNode in="SourceGraphic"/></feMerge></filter></defs>',
-         f'<rect width="{w}" height="{h}" fill="{bg}"/>']
+    return chars
 
-    def seg_poly(x, y, sw, shh, name):
-        # Segment polygons in a local cell (x, y, width, height), pointed ends.
+
+def seg_paths(chars, x0, y0, cw, ch_h, layer, sk=0.10):
+    """7-segment glyph outlines. layer "ghost" draws every segment, "lit" only the lit ones."""
+    t = max(1.2, cw * 0.16)
+    sw = cw * 0.68
+
+    def poly(x, y, name):
         hw = sw - t
-        hh = (shh - t) / 2
+        hh = (ch_h - t) / 2
+        e = t * 0.12
         if name in "agd":
             yy = {"a": y, "g": y + hh, "d": y + 2 * hh}[name]
-            pts = [(x + t / 2 + 1, yy + t / 2), (x + t + 1, yy), (x + hw - 1, yy), (x + hw + t / 2 - 1, yy + t / 2),
-                   (x + hw - 1, yy + t), (x + t + 1, yy + t)]
+            pts = [(x + t / 2 + e, yy + t / 2), (x + t + e, yy), (x + hw - e, yy), (x + hw + t / 2 - e, yy + t / 2),
+                   (x + hw - e, yy + t), (x + t + e, yy + t)]
         else:
             xx = x if name in "fe" else x + hw
             yy = y if name in "fb" else y + hh
-            pts = [(xx + t / 2, yy + t / 2 + 1), (xx + t, yy + t + 1), (xx + t, yy + hh - 1),
-                   (xx + t / 2, yy + hh + t / 2 - 1), (xx, yy + hh - 1), (xx, yy + t + 1)]
-        # Skew around the cell baseline.
-        base = y + shh
+            pts = [(xx + t / 2, yy + t / 2 + e), (xx + t, yy + t + e), (xx + t, yy + hh - e),
+                   (xx + t / 2, yy + hh + t / 2 - e), (xx, yy + hh - e), (xx, yy + t + e)]
+        base = y + ch_h
         pts = [(px + (base - py) * sk, py) for px, py in pts]
         return "M" + " L".join(f"{px:.2f} {py:.2f}" for px, py in pts) + " Z"
 
-    for layer, color, filt in (("ghost", ghost, ""), ("lit", lit, ' filter="url(#glow)"')):
-        paths = []
-        for i, (c, dot) in enumerate(chars):
-            x = 8 + i * cw + cw * 0.12
-            y = 9
-            sw = cw * 0.68
-            on = SEGS.get(c, "")
-            for s in "abcdefg":
-                if layer == "ghost" or s in on:
-                    paths.append(seg_poly(x, y, sw, ch_h, s))
-            if layer == "ghost" or dot:
-                r = t * 0.55
-                cx_, cy_ = x + sw + t * 0.6, y + ch_h - r
-                paths.append(f"M{cx_ - r:.2f} {cy_:.2f} a{r:.2f} {r:.2f} 0 1 0 {2 * r:.2f} 0 "
-                             f"a{r:.2f} {r:.2f} 0 1 0 {-2 * r:.2f} 0 Z")
-        o.append(f'<path d="{" ".join(paths)}" fill="{color}"{filt}/>')
+    paths = []
+    for i, (c, dot) in enumerate(chars):
+        x = x0 + i * cw + cw * 0.12
+        on = SEGS.get(c, "")
+        for sg in "abcdefg":
+            if layer == "ghost" or sg in on:
+                paths.append(poly(x, y0, sg))
+        if layer == "ghost" or dot:
+            r = t * 0.55
+            cx_, cy_ = x + sw + t * 0.6, y0 + ch_h - r
+            paths.append(f"M{cx_ - r:.2f} {cy_:.2f} a{r:.2f} {r:.2f} 0 1 0 {2 * r:.2f} 0 "
+                         f"a{r:.2f} {r:.2f} 0 1 0 {-2 * r:.2f} 0 Z")
+    return " ".join(paths)
+
+
+def glow_defs(sd):
+    return (f'<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%">'
+            f'<feGaussianBlur stdDeviation="{sd:.2f}" result="b"/><feMerge><feMergeNode in="b"/>'
+            f'<feMergeNode in="SourceGraphic"/></feMerge></filter></defs>')
+
+
+def seg_svg(d):
+    w, h = d["w"], d["h"]
+    chars = split_chars(d["text"])
+    cw = (w - 16) / len(chars)
+    o = [glow_defs(2.2), f'<rect width="{w}" height="{h}" fill="{DIGI_BG}"/>']
+    o.append(f'<path d="{seg_paths(chars, 8, 9, cw, h - 18, "ghost")}" fill="{DIGI_GHOST}"/>')
+    o.append(f'<path d="{seg_paths(chars, 8, 9, cw, h - 18, "lit")}" fill="{DIGI_LIT}" filter="url(#glow)"/>')
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">' + "".join(o) + "</svg>"
+
+
+def bar_zone(kind, centre):
+    if kind == "level":
+        return "green" if centre < -9 else ("amber" if centre < -3 else "red")
+    return "red" if centre < 0 else ("amber" if kind == "ride" else "green")
+
+
+def meter_svg(v):
+    """Digital meter window: label + aux on top, big 7-segment value + unit, segment bar + scale."""
+    m = v["digi"]
+    W, H = m["win_w"], m["win_h"]
+    kind = m["kind"]
+    pad = max(7.0, H * 0.07)
+    fs = max(6.0, H * 0.078)
+    o = [glow_defs(max(1.0, H * 0.012)), f'<rect width="{W}" height="{H}" fill="{DIGI_BG}"/>',
+         # Faint inner shading so the window reads as glass over a deep cavity.
+         f'<defs><linearGradient id="sh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.55"/>'
+         f'<stop offset="0.25" stop-color="#000" stop-opacity="0"/></linearGradient></defs>']
+    family = "Inter, sans-serif"
+    o.append(text(pad, pad + fs * 0.75, m["label"], fs, DIGI_DIM, 700, "start", fs * 0.14, family))
+    if m["aux"]:
+        o.append(text(W - pad, pad + fs * 0.75, m["aux"], fs, DIGI_DIM, 700, "end", fs * 0.14, family))
+    # Big value + unit, centred as a group.
+    chars = split_chars(m["value"])
+    ch_h = H * 0.36
+    cw = ch_h * 0.62
+    ufs = H * 0.095
+    unit_w = text_box(0, 0, m["unit"], ufs, 700, "start", ufs * 0.1)[2] if m["unit"] else 0
+    group = len(chars) * cw + (ufs * 0.5 + unit_w if m["unit"] else 0)
+    x0 = (W - group) / 2
+    y0 = pad + fs + H * 0.07
+    o.append(f'<path d="{seg_paths(chars, x0, y0, cw, ch_h, "ghost")}" fill="{DIGI_GHOST}"/>')
+    o.append(f'<path d="{seg_paths(chars, x0, y0, cw, ch_h, "lit")}" fill="{DIGI_LIT}" filter="url(#glow)"/>')
+    if m["unit"]:
+        o.append(text(x0 + len(chars) * cw + ufs * 0.5, y0 + ch_h, m["unit"], ufs, DIGI_LIT, 700, "start", ufs * 0.1, family))
+    # Segment bar.
+    lo, hi, n = {"level": (-36.0, 0.0, 36), "ride": (-12.0, 12.0, 24), "phase": (-1.0, 1.0, 20)}[kind]
+    bx0, bx1 = pad, W - pad
+    by = H * 0.70
+    bh = max(3.0, H * 0.085)
+    pitch = (bx1 - bx0) / n
+    val = max(lo, min(hi, m["bar"]))
+    for i in range(n):
+        a, b = lo + (hi - lo) * i / n, lo + (hi - lo) * (i + 1) / n
+        c = (a + b) / 2
+        if kind == "level":
+            lit = c <= val
+        else:                                # Centre-zero: light from 0 toward the value.
+            lit = (0 <= c <= val) or (val <= c <= 0)
+        on, off = LED[bar_zone(kind, c)]
+        x = bx0 + i * pitch + pitch * 0.12
+        o.append(f'<rect x="{x:.2f}" y="{by:.2f}" width="{pitch * 0.76:.2f}" height="{bh:.2f}" rx="{pitch * 0.12:.2f}" '
+                 f'fill="{on if lit else off}"{" filter=\"url(#glow)\"" if lit else ""}/>')
+    # Scale under the bar.
+    marks = {"level": [(-36, "-36"), (-24, "-24"), (-18, "-18"), (-12, "-12"), (-6, "-6"), (0, "0")],
+             "ride": [(-12, "-12"), (-6, "-6"), (0, "0"), (6, "+6"), (12, "+12")],
+             "phase": [(-1, "-1"), (0, "0"), (1, "+1")]}[kind]
+    sy = by + bh + fs * 1.25
+    for mv, lab in marks:
+        x = bx0 + (mv - lo) / (hi - lo) * (bx1 - bx0)
+        anchor = "start" if mv == lo else ("end" if mv == hi else "middle")
+        o.append(text(x, sy, lab, fs * 0.92, DIGI_DIM, 700, anchor, 0, family))
+    # Target marker: a small amber triangle above the bar.
+    if m["target"] is not None:
+        x = bx0 + (m["target"] - lo) / (hi - lo) * (bx1 - bx0)
+        ts = bh * 0.85
+        o.append(f'<path d="M{x - ts * 0.7:.2f} {by - ts - 2:.2f} L{x + ts * 0.7:.2f} {by - ts - 2:.2f} L{x:.2f} {by - 2:.2f} Z" '
+                 f'fill="{DIGI_LIT}" filter="url(#glow)"/>')
+    o.append(f'<rect width="{W}" height="{H}" fill="url(#sh)"/>')
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">' + "".join(o) + "</svg>"
 
 
 # ---- Spacing check -----------------------------------------------------------------------
@@ -652,6 +753,10 @@ def main():
         write(f"unit{num}_decal", panel_svg(u), W, u["panel"]["h"], 3)
         for d in u["displays"]:
             write(f"unit{num}_seg_{d['id']}", seg_svg(d), d["w"], d["h"], 6)
+        for i, v in enumerate(u["vus"]):
+            if "digi" in v:
+                m = v["digi"]
+                write(f"unit{num}_meter_{i}", meter_svg(v), m["win_w"], m["win_h"], 6)
     # Retire the single-unit files from the first study.
     for old in ("panel_decal.svg", "panel_decal.png", "vu_face.svg", "vu_face.png"):
         p = os.path.join(TEX, old)
