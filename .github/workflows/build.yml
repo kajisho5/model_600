@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake g++ qt6-base-dev qt6-multimedia-dev libobs-dev \
+          sudo apt-get install -y -qq cmake g++ qt6-base-dev libobs-dev \
             fonts-ipafont-gothic fonts-noto-color-emoji
 
       - name: Configure
@@ -53,10 +53,12 @@ jobs:
           name: gui-samples
           path: gui-samples-out/*.png
 
-  # Windows (MSVC) and macOS (Apple Clang, Universal2): every source except the
-  # two OBS adapters, warnings as errors, then the tests and the real GUI.
-  # The OBS adapters need the libobs SDK and are built by the Linux jobs.
-  portable:
+  # Windows (MSVC) and macOS (Apple Clang, Universal2): the full OBS plugin.
+  # The libobs + obs-frontend-api SDK is built from the obs-studio sources with
+  # the official obs-deps, as obsproject/obs-plugintemplate does
+  # (tools/ci/obs_sdk.cmake), and cached. Every OBS-independent source is also
+  # compiled with warnings as errors, then the tests and the real GUI run.
+  desktop:
     name: ${{ matrix.os_name }} (${{ matrix.edition }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -70,22 +72,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+      - name: Paths
+        shell: bash
+        run: |
+          # One forward-slash path usable by CMake, MSVC tools and bash alike.
+          root="$(cd "$GITHUB_WORKSPACE/.." && pwd)/obs-sdk"
+          if [ "$RUNNER_OS" = "Windows" ]; then root="$(cygpath -m "$root")"; fi
+          echo "OBS_SDK=$root" >> "$GITHUB_ENV"
+
+      - name: Cache OBS SDK
+        id: obs-cache
+        uses: actions/cache@v4
         with:
-          version: '6.6.3'
-          modules: 'qtmultimedia'
-          cache: true
+          path: ${{ env.OBS_SDK }}
+          key: obs-sdk-${{ runner.os }}-${{ hashFiles('tools/ci/obs_sdk.cmake') }}
+
+      - name: Build OBS SDK (libobs + obs-frontend-api)
+        if: steps.obs-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: cmake -DOUT="$OBS_SDK" -P tools/ci/obs_sdk.cmake
 
       - name: Configure
-        run: >
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DMODEL600_BUILD_PLUGIN=OFF
-          -DMODEL600_BUILD_PORTABLE_CHECK=ON
-          -DMODEL600_BUILD_TESTS=ON
-          -DMODEL600_BUILD_GUI_SAMPLES=ON
-          -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
+        shell: bash
+        run: |
+          EXTRA=""
+          if [ "$RUNNER_OS" = "macOS" ]; then EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"; fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA \
+            "-DCMAKE_PREFIX_PATH=$OBS_SDK/sdk;$OBS_SDK/deps;$OBS_SDK/qt6" \
+            -DMODEL600_BUILD_PLUGIN=ON \
+            -DMODEL600_BUILD_PORTABLE_CHECK=ON \
+            -DMODEL600_BUILD_TESTS=ON \
+            -DMODEL600_BUILD_GUI_SAMPLES=ON \
+            -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -93,22 +111,40 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Check Universal2 slices
-        if: runner.os == 'macOS'
-        run: lipo -info build/m600_test_dsp
+      - name: Check binaries
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            lipo -info build/model600.so build/m600_test_dsp
+          else
+            ls -l build/Release/model600.dll
+          fi
 
       - name: Render GUI samples
         if: matrix.edition == 'pro'
         shell: bash
         env:
-          QT_QPA_PLATFORM: offscreen
           QT_SCALE_FACTOR: '2'
         run: |
-          if [ -x build/Release/m600_render_gui_samples.exe ]; then
+          sdk="$OBS_SDK"
+          if [ "$RUNNER_OS" = "Windows" ]; then sdk="$(cygpath -u "$OBS_SDK")"; fi
+          export PATH="$sdk/qt6/bin:$sdk/deps/bin:$PATH"
+          export QT_PLUGIN_PATH="$OBS_SDK/qt6/plugins"
+          # Prefer the headless platform plugin when the obs-deps Qt ships it.
+          if ls "$sdk"/qt6/plugins/platforms/*offscreen* >/dev/null 2>&1; then export QT_QPA_PLATFORM=offscreen; fi
+          if [ -f build/Release/m600_render_gui_samples.exe ]; then
             ./build/Release/m600_render_gui_samples.exe gui-samples-out
           else
             ./build/m600_render_gui_samples gui-samples-out
           fi
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: model600-${{ runner.os }}-${{ matrix.edition }}
+          path: |
+            build/Release/model600.dll
+            build/model600.so
 
       - name: Upload GUI samples
         if: matrix.edition == 'pro'

@@ -58,7 +58,7 @@ endif()
 
 # --- Qt ----------------------------------------------------------------------
 set(CMAKE_AUTOMOC ON)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 if(MODEL600_BUILD_PLUGIN)
 # --- libobs + frontend-api ---------------------------------------------------
@@ -152,7 +152,7 @@ qt_add_resources(model600 "m600_ui" PREFIX "/m600" BASE "resources" FILES ${MODE
 
 target_link_libraries(model600 PRIVATE
     OBS::libobs
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Multimedia)
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
 
 if(TARGET OBS::obs-frontend-api)
     target_link_libraries(model600 PRIVATE OBS::obs-frontend-api)
@@ -227,7 +227,7 @@ if(MODEL600_BUILD_PORTABLE_CHECK)
     add_library(m600_portable_check OBJECT ${M600_PORTABLE_SOURCES})
     target_include_directories(m600_portable_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(m600_portable_check PRIVATE
-        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Multimedia)
+        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
     if(MODEL600_PRO_EDITION)
         target_compile_definitions(m600_portable_check PRIVATE MODEL600_PRO_EDITION=1)
     endif()
