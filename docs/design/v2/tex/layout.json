@@ -1,0 +1,219 @@
+{
+  "panel": {
+    "w": 1100,
+    "h": 480,
+    "ear": 40
+  },
+  "screws": [
+    [
+      20,
+      64
+    ],
+    [
+      20,
+      416
+    ],
+    [
+      1080,
+      64
+    ],
+    [
+      1080,
+      416
+    ]
+  ],
+  "slots": [
+    [
+      20,
+      64
+    ],
+    [
+      20,
+      416
+    ],
+    [
+      1080,
+      64
+    ],
+    [
+      1080,
+      416
+    ]
+  ],
+  "vu": {
+    "cx": 550,
+    "cy": 172,
+    "w": 320,
+    "h": 184,
+    "face_w": 284,
+    "face_h": 148,
+    "needle_vu": -1.0
+  },
+  "knobs_big": [
+    {
+      "id": "input",
+      "cx": 168,
+      "cy": 318,
+      "r": 60,
+      "label": "INPUT GAIN",
+      "unit": "dB",
+      "min": -18,
+      "max": 24,
+      "value": 3.5,
+      "marks": [
+        -18,
+        -12,
+        -6,
+        0,
+        6,
+        12,
+        18,
+        24
+      ]
+    },
+    {
+      "id": "output",
+      "cx": 940,
+      "cy": 318,
+      "r": 60,
+      "label": "OUTPUT TRIM",
+      "unit": "dB",
+      "min": -24,
+      "max": 24,
+      "value": 0.0,
+      "marks": [
+        -24,
+        -18,
+        -12,
+        -6,
+        0,
+        6,
+        12,
+        18,
+        24
+      ]
+    }
+  ],
+  "knobs_step": [
+    {
+      "id": "character",
+      "cx": 330,
+      "cy": 352,
+      "r": 28,
+      "label": "CHARACTER",
+      "positions": [
+        "SOFT",
+        "BCAST",
+        "LOUD"
+      ],
+      "spread": 55,
+      "value": 1
+    },
+    {
+      "id": "space",
+      "cx": 758,
+      "cy": 352,
+      "r": 28,
+      "label": "SPACE FX",
+      "positions": [
+        "DRY",
+        "KARAOKE",
+        "BATH",
+        "HALL",
+        "CAVE",
+        "RADIO"
+      ],
+      "spread": 120,
+      "value": 0
+    }
+  ],
+  "toggles": [
+    {
+      "id": "meter",
+      "cx": 550,
+      "cy": 300,
+      "label_l": "OUT",
+      "label_r": "GR",
+      "title": "METER",
+      "horizontal": true,
+      "on": false
+    },
+    {
+      "id": "mono",
+      "cx": 846,
+      "cy": 104,
+      "label_up": "AUTO",
+      "label_dn": "OFF",
+      "title": "MONO",
+      "on": true
+    },
+    {
+      "id": "latency",
+      "cx": 924,
+      "cy": 104,
+      "label_up": "1.5ms",
+      "label_dn": "0ms",
+      "title": "LOOK-AHEAD",
+      "on": true
+    }
+  ],
+  "buttons": [
+    {
+      "id": "cal",
+      "cx": 433,
+      "cy": 388,
+      "w": 54,
+      "h": 34,
+      "label": "CAL 10s",
+      "color": "amber",
+      "lit": false
+    },
+    {
+      "id": "ab",
+      "cx": 511,
+      "cy": 388,
+      "w": 54,
+      "h": 34,
+      "label": "A/B",
+      "color": "amber",
+      "lit": true
+    },
+    {
+      "id": "bleep",
+      "cx": 589,
+      "cy": 388,
+      "w": 54,
+      "h": 34,
+      "label": "BLEEP",
+      "color": "red",
+      "lit": false
+    },
+    {
+      "id": "cough",
+      "cx": 667,
+      "cy": 388,
+      "w": 54,
+      "h": 34,
+      "label": "COUGH",
+      "color": "amber",
+      "lit": false
+    }
+  ],
+  "jewel": {
+    "cx": 1002,
+    "cy": 104,
+    "label": "POWER"
+  },
+  "links": {
+    "x": 806,
+    "y": 168,
+    "dx": 38,
+    "lit": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  }
+}
