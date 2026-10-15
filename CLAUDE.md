@@ -20,9 +20,10 @@ Mac 向けの配布物は **Developer ID 署名 ＋ Apple の公証（notarizati
 
 ### 実行のしかた
 
-- **今は runway 側から実行する**：runway の Actions → **mac-release** → Run workflow。repo は `kajisho5/model_600`（既定値）、`build` / `products` はこのリポの `release-mac.yml` と同じ値を入れる
-- このリポの Actions → release-mac は、runway の SYNC_TOKEN 登録後（このリポに Secrets が配られた後）に使える。それまでは Secret 未登録で失敗するので、失敗しても異常ではない
-- タグ（`v1.0.0` など）を push するとバージョン付きの dmg 名になる
+- このリポの Actions → **release-mac** → Run workflow（iPhone の GitHub アプリからも可）。公証済みの dmg は実行結果の Artifacts に出る
+- タグ（`v1.0.0` など）を push しても実行され、dmg 名にバージョンが入る
+- 必要な Secrets（`ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY_P8_BASE64` / `APPLE_TEAM_ID` / `MATCH_GIT_TOKEN`）は runway の sync-secrets が配布済み。このリポで手動登録・変更しない
+- このリポは public なので Actions の macOS ランナーは無料
 
 ### 対象外
 

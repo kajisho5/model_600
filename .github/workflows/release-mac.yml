@@ -2,8 +2,6 @@
 # 実行：Actions → release-mac → Run workflow（iPhone の GitHub アプリからも可）、または v1.0.0 などのタグを push
 # 公証済みの .dmg は実行結果の Artifacts からダウンロードする。
 # ※ プラグイン本体のコードができたら、build と products を実際の構成に合わせる（今は JUCE + CMake を想定）
-# ※ このリポに Secrets を配るまで（runway の SYNC_TOKEN 登録まで）は、こちらは動かない。
-#    それまでは runway の Actions → mac-release（repo: kajisho5/model_600）で同じ署名・公証ができる
 name: release-mac
 
 on:
