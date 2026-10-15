@@ -98,13 +98,22 @@ else()
         foreach(lib IN LISTS m600_libs)
             list(APPEND byproducts "${bin}/${lib}")
         endforeach()
+        # Slices run one after another: a standalone whisper.cpp configure
+        # writes bindings/javascript/package.json into the shared source tree,
+        # and two concurrent configures race on it.
+        set(m600_after "")
+        if(m600_arch_targets)
+            list(GET m600_arch_targets -1 m600_prev)
+            set(m600_after DEPENDS ${m600_prev})
+        endif()
         ExternalProject_Add(m600_whisper_${arch}
             SOURCE_DIR "${m600_wsrc}"
             BINARY_DIR "${bin}"
             CMAKE_ARGS ${args}
             BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release --target whisper --parallel
             INSTALL_COMMAND ""
-            BUILD_BYPRODUCTS ${byproducts})
+            BUILD_BYPRODUCTS ${byproducts}
+            ${m600_after})
         list(APPEND m600_arch_targets m600_whisper_${arch})
     endforeach()
 
