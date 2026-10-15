@@ -21,7 +21,7 @@ build="$root/build-release"
 dist="$root/dist-mac"
 
 [ "$(uname -s)" = "Darwin" ] || { echo "error: macOS only" >&2; exit 1; }
-xcodebuild -version | head -1
+xcodebuild -version
 
 # 1. OBS SDK (libobs + obs-frontend-api), skipped when already present.
 if [ ! -d "$sdk/sdk" ]; then
