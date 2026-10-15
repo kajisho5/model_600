@@ -69,7 +69,8 @@ endif()
 set(MODEL600_SOURCES
     src/plugin-main.cpp
     src/audio-filter.cpp
-    src/custom-ui-dialog.cpp)
+    src/custom-ui-dialog.cpp
+    src/ui-widgets.cpp)
 
 set(MODEL600_HEADERS
     src/shared-state.hpp
@@ -78,7 +79,31 @@ set(MODEL600_HEADERS
     src/license-manager.hpp
     src/update-checker.hpp
     src/os-conflict-shield.hpp
-    src/custom-ui-dialog.hpp)
+    src/custom-ui-dialog.hpp
+    src/ui-theme.hpp
+    src/ui-widgets.hpp)
+
+# Bundled UI assets: Inter + Noto Sans JP subset (OFL 1.1) and the Blender-
+# rendered parts (tools/blender/render_parts.py). Served as :/m600/...
+set(MODEL600_UI_RESOURCES
+    resources/fonts/Inter-Regular.otf
+    resources/fonts/Inter-Medium.otf
+    resources/fonts/Inter-SemiBold.otf
+    resources/fonts/Inter-Bold.otf
+    resources/fonts/NotoSansJP-Subset-Regular.otf
+    resources/fonts/NotoSansJP-Subset-Bold.otf
+    resources/parts/fader_cap_v.png
+    resources/parts/fader_cap_h.png
+    resources/parts/knob.png
+    resources/parts/screw.png
+    resources/parts/led_off.png
+    resources/parts/led_green.png
+    resources/parts/led_amber.png
+    resources/parts/led_red.png
+    resources/parts/key_default.png
+    resources/parts/key_active.png
+    resources/parts/key_danger.png
+    resources/parts/key_primary.png)
 
 if(WIN32)
     list(APPEND MODEL600_SOURCES src/voice-command-win.cpp)
@@ -89,6 +114,7 @@ endif()
 add_library(model600 MODULE ${MODEL600_SOURCES} ${MODEL600_HEADERS})
 
 target_include_directories(model600 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+qt_add_resources(model600 "m600_ui" PREFIX "/m600" BASE "resources" FILES ${MODEL600_UI_RESOURCES})
 
 target_link_libraries(model600 PRIVATE
     OBS::libobs
@@ -154,8 +180,12 @@ if(MODEL600_BUILD_GUI_SAMPLES)
     add_executable(m600_render_gui_samples
         tools/gui_samples/render_gui_samples.cpp
         src/custom-ui-dialog.cpp
-        src/custom-ui-dialog.hpp)
+        src/custom-ui-dialog.hpp
+        src/ui-widgets.cpp
+        src/ui-widgets.hpp)
     target_include_directories(m600_render_gui_samples PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    qt_add_resources(m600_render_gui_samples "m600_ui_samples" PREFIX "/m600" BASE "resources"
+                     FILES ${MODEL600_UI_RESOURCES})
     find_package(Threads REQUIRED)
     target_link_libraries(m600_render_gui_samples PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Threads::Threads)
     if(NOT WIN32 AND NOT APPLE)

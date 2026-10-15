@@ -1,17 +1,14 @@
 // =============================================================================
 //  MODEL 600 // BROADCAST SUITE  -  SEVENTHWELL
-//  custom-ui-dialog.hpp  [Layer 2]  19" studio-rack console + UNIT 05 mixer.
+//  custom-ui-dialog.hpp  [Layer 2]  Studio console, UNIT 05 mixer, calibration.
 //
-//  Declares the GUI. Rendering is optimised: the metal chassis, rack ears,
-//  screws and scale text are baked once into a QPixmap (regenerated only when
-//  devicePixelRatio changes); the 30 fps timer repaints only the moving LED
-//  bars and stops entirely while the window is hidden (0.00 % CPU).
+//  Implements the approved design (docs/design/). The console is a 19" rack
+//  faceplate: Blender-rendered screws on the ears, a two-row header, a body
+//  specific to the unit (01-04) or the integrated mixer (05), and a status
+//  line. A 30 fps timer refreshes only while the window is visible.
 //
-//  All audio-facing reads are atomic (dsp::Telemetry / SharedBus); the GUI
-//  never touches a lock the audio thread could hold.
-//
-//  Qt6::Widgets + Qt6::Gui + Qt6::Multimedia. No OBS types here; the console is
-//  handed plain pointers so it links unchanged into the standalone VC edition.
+//  All audio-facing reads are atomic (dsp::Telemetry / SharedBus). No OBS types
+//  appear here, so the console links unchanged into the standalone VC edition.
 // =============================================================================
 #ifndef SEVENTHWELL_MODEL600_CUSTOM_UI_DIALOG_HPP
 #define SEVENTHWELL_MODEL600_CUSTOM_UI_DIALOG_HPP
@@ -22,174 +19,132 @@
 #include <array>
 #include <functional>
 
-#include <QColor>
 #include <QDialog>
-#include <QElapsedTimer>
-#include <QPixmap>
-#include <QPointer>
-#include <QSlider>
 #include <QString>
 #include <QVector>
 #include <QWidget>
 
 class QLabel;
-class QPushButton;
-class QComboBox;
-class QCheckBox;
-class QProgressBar;
+class QStackedLayout;
 class QTimer;
-class QPaintEvent;
-class QShowEvent;
-class QHideEvent;
-class QWheelEvent;
-class QMouseEvent;
-class QHBoxLayout;
-class QVBoxLayout;
-class QGridLayout;
-
-namespace sw::model600 { class SharedBus; }
 
 namespace sw::model600::ui {
 
-// Language toggle for the JP/EN live switch.
+class HeaderBar;
+class LedMeter;
+class MeterScale;
+class RackFader;
+class RackKey;
+class Readout;
+class SectionLabel;
+class SegmentedControl;
+class StatusLine;
+class ValueBox;
+class TargetBar;
+class CorrelationBar;
+class KnobView;
+
 enum class UiLang : int { EN = 0, JA = 1 };
 
-// A localised string pair.
-struct L { QString en, ja; const QString& pick(UiLang l) const { return l == UiLang::JA ? ja : en; } };
-
-// Palette for the brushed-metal broadcast aesthetic.
-struct Skin {
-    QColor chassis_top{64, 66, 70};
-    QColor chassis_bottom{34, 35, 38};
-    QColor panel{24, 25, 28};
-    QColor ear{44, 46, 50};
-    QColor screw{150, 152, 156};
-    QColor text{214, 216, 220};
-    QColor text_dim{120, 123, 128};
-    QColor accent{255, 176, 32};     // SEVENTHWELL amber.
-    QColor led_green{64, 220, 110};
-    QColor led_yellow{244, 208, 54};
-    QColor led_red{236, 72, 54};
-    QColor led_off{40, 42, 46};
-    QColor gr_blue{72, 170, 244};
+// Japanese / English string pair.
+struct L {
+    QString en, ja;
+    const QString& pick(UiLang l) const { return l == UiLang::JA ? ja : en; }
 };
 
 // -----------------------------------------------------------------------------
-//  A single custom-painted LED meter column (peak + RMS + hold, ballistics).
-// -----------------------------------------------------------------------------
-class LedMeter : public QWidget {
-    Q_OBJECT
-public:
-    enum Kind { Level, GainReduction };
-    explicit LedMeter(Kind kind, const Skin* skin, QWidget* parent = nullptr);
-    void set_values(float peak_db, float rms_db, float hold_db) noexcept;
-    void set_gr(float gr_db) noexcept;
-    void reset_hold() noexcept;
-    // Horizontal bars are used by the 120 px MINI strip.
-    void set_horizontal(bool horizontal);
-    QSize sizeHint() const override;
-protected:
-    void paintEvent(QPaintEvent*) override;
-    void mousePressEvent(QMouseEvent*) override;
-private:
-    Kind kind_;
-    const Skin* skin_;
-    bool horizontal_ = false;
-    float peak_db_ = kSilenceFloor, rms_db_ = kSilenceFloor, hold_db_ = kSilenceFloor, gr_db_ = 0.0f;
-    static constexpr float kSilenceFloor = -60.0f;
-};
-
-// -----------------------------------------------------------------------------
-//  A fader that ignores the plain wheel, uses Ctrl+wheel for 0.1 dB nudges and
-//  snaps to 0.0 dB on double-click.
-// -----------------------------------------------------------------------------
-class TrimFader : public QSlider {
-    Q_OBJECT
-public:
-    explicit TrimFader(QWidget* parent = nullptr);
-    void set_db(float db);
-    float db() const;
-signals:
-    void dbChanged(float db);
-protected:
-    void wheelEvent(QWheelEvent*) override;
-    void mouseDoubleClickEvent(QMouseEvent*) override;
-};
-
-// -----------------------------------------------------------------------------
-//  One channel strip for the UNIT 05 mixer (also reused as the compact view).
+//  One mixer channel strip (UNIT 05).
 // -----------------------------------------------------------------------------
 class ChannelStrip : public QWidget {
     Q_OBJECT
 public:
-    ChannelStrip(Mode mode, const L& title, const Skin* skin, QWidget* parent = nullptr);
-    void update_from(float true_peak, float peak_hold, float rms, float st_lufs, float gr, float duck, bool live);
-    void set_language(UiLang l);
+    ChannelStrip(Mode mode, const QString& number, const QString& name, QWidget* parent = nullptr);
+    void update_from(float true_peak, float rms, float st_lufs, float gr, float duck, bool live);
     Mode mode() const noexcept { return mode_; }
-    TrimFader* fader() const noexcept { return fader_; }
+    RackFader* fader() const noexcept { return fader_; }
 signals:
     void trimMoved(Mode mode, float db);
+protected:
+    void paintEvent(QPaintEvent*) override;
 private:
     Mode mode_;
-    L title_;
-    const Skin* skin_;
-    QLabel* name_ = nullptr;
-    QLabel* readout_ = nullptr;
+    QString number_, name_;
+    float st_lufs_ = -120.0f;
+    bool live_ = false;
+    ValueBox* pk_box_ = nullptr;
+    ValueBox* duck_box_ = nullptr;
+    ValueBox* fader_box_ = nullptr;
     LedMeter* level_ = nullptr;
-    LedMeter* gr_ = nullptr;
-    TrimFader* fader_ = nullptr;
-    UiLang lang_ = UiLang::JA;
+    LedMeter* duck_ = nullptr;
+    RackFader* fader_ = nullptr;
+    float hold_ = -120.0f;
 };
 
 // -----------------------------------------------------------------------------
-//  The calibration modal (10 s cue-card measurement).
+//  10-second automatic input calibration (measuring / result states).
 // -----------------------------------------------------------------------------
 class CalibrationDialog : public QDialog {
     Q_OBJECT
 public:
-    CalibrationDialog(dsp::Engine* engine, const Skin* skin, UiLang lang, QWidget* parent = nullptr);
+    CalibrationDialog(dsp::Engine* engine, UiLang lang, QWidget* parent = nullptr);
+    enum class State { Measuring, Success, Clipped, NoVoice };
+    State state() const noexcept { return state_; }
 protected:
     void showEvent(QShowEvent*) override;
+    void paintEvent(QPaintEvent*) override;
+    void reject() override;
 private slots:
     void tick();
 private:
-    void finish();
+    void start();
+    void show_result();
+    void build_measuring_page();
+    void build_result_page();
     dsp::Engine* engine_;
-    const Skin* skin_;
     UiLang lang_;
-    QLabel* cue_ = nullptr;
-    QLabel* status_ = nullptr;
-    QProgressBar* bar_ = nullptr;
-    QPushButton* close_btn_ = nullptr;
+    State state_ = State::Measuring;
+    bool started_ = false;
     QTimer* timer_ = nullptr;
-    bool running_ = false;
+    QStackedLayout* pages_ = nullptr;
+    // Measuring page.
+    LedMeter* input_meter_ = nullptr;
+    QWidget* progress_ = nullptr;
+    QLabel* time_label_ = nullptr;
+    // Result page.
+    QLabel* title_ = nullptr;
+    QLabel* body_ = nullptr;
+    QWidget* result_bar_ = nullptr;
+    Readout* r1_ = nullptr;
+    Readout* r2_ = nullptr;
+    Readout* r3_ = nullptr;
+    KnobView* knob_ = nullptr;
+    QLabel* knob_text_ = nullptr;
+    LedMeter* measured_meter_ = nullptr;
+    RackKey* secondary_ = nullptr;
+    RackKey* primary_ = nullptr;
 };
 
 // -----------------------------------------------------------------------------
-//  The main studio console.
+//  The studio console.
 // -----------------------------------------------------------------------------
 class StudioConsole : public QDialog {
     Q_OBJECT
 public:
-    // `director` enables the UNIT 05 master section (Pro + MODE_DIRECTOR).
+    // `director` builds the UNIT 05 mixer (Pro + MODE_DIRECTOR).
     StudioConsole(dsp::Engine* engine, SharedBus* bus, bool director, bool pro,
                   QWidget* parent = nullptr);
     ~StudioConsole() override;
 
     void set_language(UiLang lang);
     UiLang language() const noexcept { return lang_; }
-
-    // Called by the update checker (queued to the UI thread).
     void set_update_available(const QString& version);
 
-    // Hook the console can call to request a YouTube chapter mark / karte / etc.
+    // Host hooks.
     std::function<void()> on_request_chapter;
     std::function<void(int /*scene*/)> on_scene_macro;
     std::function<void()> on_export_karte;
     std::function<void()> on_deactivate_pc;
-    // Fired whenever the console changes an engine parameter, so the host can
-    // write the new values into the OBS scene data.
-    std::function<void()> on_params_changed;
+    std::function<void()> on_params_changed;   // Persist params into the OBS scene.
 
 signals:
     void chapterRequested();
@@ -201,101 +156,86 @@ protected:
 
 private slots:
     void refresh();              // 30 fps meter tick.
-    void toggle_pin();
-    void toggle_mini();
-    void toggle_language();
+    void toggle_pin(bool on);
+    void toggle_mini(bool on);
     void panic_reset();
     void run_calibration();
-    void start_audition();
-    void fire_bleep();
-    void hold_cough();
+    void toggle_audition();
 
 private:
     void build_ui();
-    void build_header(QVBoxLayout* into);
-    void build_mini_bar(QVBoxLayout* into);
-    void build_unit01(QVBoxLayout* into);
-    void build_unit05(QVBoxLayout* into);
-    void rebuild_chassis_pixmap();
+    QWidget* build_unit_body();
+    QWidget* build_director_body();
+    QWidget* build_mini_bar();
+    QWidget* build_trim_row(QWidget* parent);
+    QWidget* build_param_row(QWidget* parent, RackFader*& fader, ValueBox*& box,
+                             float lo, float hi, const QVector<float>& marks, float value,
+                             const QString& unit);
     void relabel();
-    void clamp_to_screen();      // showEvent geometry guard.
-    void attach_strip(ChannelStrip* strip);
+    void clamp_to_screen();
+    void changed();              // Fires on_params_changed.
+    void update_status();
+    QString unit_number() const;
+    QString unit_name() const;
 
     dsp::Engine* engine_;
     SharedBus*   bus_;
     bool director_, pro_;
     UiLang lang_ = UiLang::JA;
-    Skin skin_;
-
-    QPixmap chassis_;
-    qreal   chassis_dpr_ = 0.0;
-    QSize   chassis_size_;
-    int     chassis_panel_top_ = -1;
-
-    QWidget* header_box_ = nullptr;   // Two-row header (brand / lamps + buttons).
-    QWidget* body_box_ = nullptr;     // Full console body, hidden in MINI.
-    QWidget* mini_bar_ = nullptr;     // 120 px meter strip, shown in MINI.
-    LedMeter* mini_meter_ = nullptr;
-    QLabel* mini_readout_ = nullptr;
-
     QTimer* timer_ = nullptr;
-    bool    pinned_ = false, mini_ = false;
-
-    // Header widgets.
-    QLabel* link_matrix_ = nullptr;
-    QPushButton* pin_btn_ = nullptr;
-    QPushButton* mini_btn_ = nullptr;
-    QPushButton* lang_btn_ = nullptr;
-    QPushButton* reset_btn_ = nullptr;
-    QPushButton* update_btn_ = nullptr;
+    bool mini_ = false;
     QString update_version_;
-    bool update_available_ = false;
 
-    // UNIT 01 section.
-    QWidget* unit01_box_ = nullptr;
-    LedMeter* mic_level_ = nullptr;
-    LedMeter* mic_gr_ = nullptr;
-    QLabel* mic_readout_ = nullptr;
-    QLabel* mic_hint_ = nullptr;
-    QLabel* char_lbl_ = nullptr;
-    QLabel* fx_lbl_ = nullptr;
-    QLabel* trim_lbl_ = nullptr;
-    QComboBox* character_ = nullptr;
-    QComboBox* space_fx_ = nullptr;
-    QPushButton* calib_btn_ = nullptr;
-    QPushButton* audition_btn_ = nullptr;
-    QPushButton* bleep_btn_ = nullptr;
-    QPushButton* cough_btn_ = nullptr;
-    TrimFader* mic_trim_ = nullptr;
+    HeaderBar* header_ = nullptr;
+    QWidget* body_ = nullptr;
+    QWidget* mini_bar_ = nullptr;
+    StatusLine* status_ = nullptr;
 
-    // UNIT 05 section.
-    QWidget* unit05_box_ = nullptr;
-    QLabel* unit05_title_ = nullptr;
-    QLabel* master_title_ = nullptr;
+    // Unit body (01-04).
+    LedMeter* out_meter_ = nullptr;
+    LedMeter* gr_meter_ = nullptr;
+    ValueBox* pk_box_ = nullptr;
+    ValueBox* gr_box_ = nullptr;
+    std::array<Readout*, 4> readouts_{nullptr, nullptr, nullptr, nullptr};
+    std::array<SectionLabel*, 6> section_{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    SegmentedControl* character_ = nullptr;
+    SegmentedControl* space_fx_ = nullptr;
+    RackKey* calib_key_ = nullptr;
+    RackKey* audition_key_ = nullptr;
+    RackKey* bleep_key_ = nullptr;
+    RackKey* cough_key_ = nullptr;
+    RackKey* safe_key_ = nullptr;
+    RackKey* swell_key_ = nullptr;
+    RackFader* trim_ = nullptr;
+    ValueBox* trim_box_ = nullptr;
+    RackFader* param_a_ = nullptr;
+    ValueBox* param_a_box_ = nullptr;
+    QString param_a_unit_;
+    RackFader* param_b_ = nullptr;
+    ValueBox* param_b_box_ = nullptr;
+
+    // Director body (05).
     std::array<ChannelStrip*, 4> strips_{nullptr, nullptr, nullptr, nullptr};
-    QLabel* master_lufs_ = nullptr;
-    QLabel* golden_zone_ = nullptr;
-    QLabel* phase_corr_ = nullptr;
-    QCheckBox* mono_check_ = nullptr;
-    QPushButton* scene_btns_[4] = {nullptr, nullptr, nullptr, nullptr};
-    QPushButton* chapter_btn_ = nullptr;
-    QPushButton* karte_btn_ = nullptr;
-    QPushButton* deactivate_btn_ = nullptr;
+    std::array<Readout*, 3> master_{nullptr, nullptr, nullptr};
+    SectionLabel* target_label_ = nullptr;
+    SectionLabel* phase_label_ = nullptr;
+    SectionLabel* scene_label_ = nullptr;
+    SectionLabel* master_label_ = nullptr;
+    TargetBar* target_ = nullptr;
+    CorrelationBar* corr_ = nullptr;
+    RackKey* mono_key_ = nullptr;
+    RackKey* meter_reset_key_ = nullptr;
+    SegmentedControl* scene_ = nullptr;
+    RackKey* chapter_key_ = nullptr;
+    RackKey* karte_key_ = nullptr;
 
-    // Collected relabel callbacks so JP/EN flips every string live.
-    QVector<std::function<void()>> relabel_hooks_;
+    // Mini strip.
+    LedMeter* mini_meter_ = nullptr;
+    QWidget* mini_values_ = nullptr;
 };
 
-// -----------------------------------------------------------------------------
-//  Loudness / meter formatting helpers (header-inline, used by .cpp + tests).
-// -----------------------------------------------------------------------------
-inline QString fmt_db(float db, int prec = 1) {
-    if (db <= -119.0f) return QStringLiteral("-∞");   // -INF
-    return QString::number(static_cast<double>(db), 'f', prec);
-}
-inline bool in_youtube_golden_zone(float lufs_i) noexcept {
-    return lufs_i >= -13.5f && lufs_i <= -10.5f; // -12.0 +/- 1.5
-}
+// Golden zone for YouTube Live: -12.0 +/- 1.5 LUFS integrated.
+inline bool in_youtube_golden_zone(float lufs_i) noexcept { return lufs_i >= -13.5f && lufs_i <= -10.5f; }
 
 } // namespace sw::model600::ui
 

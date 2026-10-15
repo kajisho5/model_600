@@ -293,7 +293,7 @@ static obs_properties_t* get_properties(void* data) {
     obs_properties_t* props = obs_properties_create();
 
     obs_properties_add_button(props, "open_console",
-        "\U0001F39B️ OPEN STUDIO CONSOLE (専用コンソール画面を開く)",
+        "OPEN STUDIO CONSOLE  (専用コンソール画面を開く)",
         open_console_clicked);
 
     obs_properties_add_bool(props, keys::bypass, "Bypass (バイパス)");
@@ -431,7 +431,7 @@ QString m600_collect_karte_body() {
     const bool golden = master_lufs >= -13.5f && master_lufs <= -10.5f;
     out += QStringLiteral("\n\u7DCF\u5408 / Summary: %1 LUFS%2, \u7D76\u53EB\u9632\u885B %3 \u56DE\n")
                .arg(fmt(master_lufs),
-                    golden ? QStringLiteral(" \u2713 YOUTUBE LIVE GOLDEN ZONE") : QString())
+                    golden ? QStringLiteral("  (YouTube Live 目標帯 -12.0 ±1.5 LUFS 内)") : QString())
                .arg(screams);
     return out;
 }

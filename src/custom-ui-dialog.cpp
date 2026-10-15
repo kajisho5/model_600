@@ -1,313 +1,525 @@
 // =============================================================================
 //  MODEL 600 // BROADCAST SUITE  -  SEVENTHWELL
-//  custom-ui-dialog.cpp  [Layer 2]  Studio console + UNIT 05 mixer rendering.
+//  custom-ui-dialog.cpp  [Layer 2]  Studio console, UNIT 05 mixer, calibration.
 // =============================================================================
 #include "custom-ui-dialog.hpp"
+#include "ui-theme.hpp"
+#include "ui-widgets.hpp"
 
-#include <QApplication>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QFont>
-#include <QGridLayout>
-#include <QGroupBox>
+#include <QDesktopServices>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QHideEvent>
 #include <QLabel>
-#include <QLinearGradient>
-#include <QMouseEvent>
+#include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
-#include <QPaintEvent>
-#include <QProgressBar>
-#include <QPushButton>
+#include <QPalette>
 #include <QScreen>
 #include <QShowEvent>
-#include <QHideEvent>
-#include <QSlider>
+#include <QStackedLayout>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
-#include <QWheelEvent>
 #include <QWindow>
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace sw::model600::ui {
 
-// =============================================================================
-//  LedMeter
-// =============================================================================
-LedMeter::LedMeter(Kind kind, const Skin* skin, QWidget* parent)
-    : QWidget(parent), kind_(kind), skin_(skin) {
-    setMinimumSize(18, 120);
-    setAttribute(Qt::WA_OpaquePaintEvent, true);
-    setCursor(Qt::PointingHandCursor);
+namespace {
+
+constexpr int kEar = 18;   // Rack ear width (px).
+
+// Palette so native children (message boxes, menus) match the console.
+QPalette studio_palette() {
+    QPalette pal;
+    pal.setColor(QPalette::Window, Tok::faceplate);
+    pal.setColor(QPalette::WindowText, Tok::t1);
+    pal.setColor(QPalette::Base, Tok::panel);
+    pal.setColor(QPalette::AlternateBase, Tok::raised);
+    pal.setColor(QPalette::Text, Tok::t1);
+    pal.setColor(QPalette::Button, Tok::raised);
+    pal.setColor(QPalette::ButtonText, Tok::t1);
+    pal.setColor(QPalette::Highlight, Tok::accent);
+    pal.setColor(QPalette::HighlightedText, QColor(0x1A, 0x12, 0x06));
+    pal.setColor(QPalette::ToolTipBase, Tok::raised);
+    pal.setColor(QPalette::ToolTipText, Tok::t1);
+    pal.setColor(QPalette::PlaceholderText, Tok::t3);
+    return pal;
 }
 
-QSize LedMeter::sizeHint() const { return horizontal_ ? QSize(240, 14) : QSize(22, 160); }
-
-void LedMeter::set_horizontal(bool horizontal) {
-    horizontal_ = horizontal;
-    if (horizontal_) { setMinimumSize(120, 12); setMaximumHeight(16); }
-    else             { setMinimumSize(18, 120); setMaximumHeight(QWIDGETSIZE_MAX); }
-    updateGeometry();
+QLabel* make_text(const QString& text, int px, int weight, const QColor& color, QWidget* parent,
+                  bool wrap = false) {
+    auto* l = new QLabel(text, parent);
+    l->setFont(make_font(px, weight));
+    QPalette pal = l->palette();
+    pal.setColor(QPalette::WindowText, color);
+    l->setPalette(pal);
+    l->setWordWrap(wrap);
+    return l;
 }
 
-void LedMeter::set_values(float peak_db, float rms_db, float hold_db) noexcept {
-    peak_db_ = peak_db; rms_db_ = rms_db; hold_db_ = hold_db;
-}
-void LedMeter::set_gr(float gr_db) noexcept { gr_db_ = gr_db; }
-void LedMeter::reset_hold() noexcept { hold_db_ = kSilenceFloor; update(); }
+// Rounded panel background (strips, master section, script card).
+class PanelBox : public QWidget {
+public:
+    explicit PanelBox(QWidget* parent = nullptr, qreal radius = 6) : QWidget(parent), radius_(radius) {}
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(QPen(Tok::line, 1));
+        p.setBrush(Tok::panel);
+        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius_, radius_);
+    }
+private:
+    qreal radius_;
+};
 
-void LedMeter::mousePressEvent(QMouseEvent*) { reset_hold(); }
+// 4 px status colour bar on the left of a calibration result.
+class ColorBar : public QWidget {
+public:
+    explicit ColorBar(QWidget* parent = nullptr) : QWidget(parent) { setFixedWidth(4); }
+    void set_color(const QColor& c) { color_ = c; update(); }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(Qt::NoPen);
+        p.setBrush(color_);
+        p.drawRoundedRect(QRectF(rect()), 2, 2);
+    }
+private:
+    QColor color_ = Tok::ok;
+};
 
-void LedMeter::paintEvent(QPaintEvent*) {
-    QPainter p(this);
-    const QRect r = rect().adjusted(1, 1, -1, -1);
-    p.fillRect(rect(), skin_->panel);
+// Amber progress track.
+class Progress : public QWidget {
+public:
+    explicit Progress(QWidget* parent = nullptr) : QWidget(parent) { setFixedHeight(10); }
+    void set_value(qreal v) { if (std::abs(v - value_) > 1e-3) { value_ = v; update(); } }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(QPen(Tok::line, 1));
+        p.setBrush(Tok::off);
+        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 5, 5);
+        p.setPen(Qt::NoPen);
+        p.setBrush(Tok::accent);
+        p.drawRoundedRect(QRectF(0, 0, width() * std::clamp(value_, 0.0, 1.0), height()), 5, 5);
+    }
+private:
+    qreal value_ = 0;
+};
 
-    const int segs = 24;
-    const int gap = 1;
-    const float seg_h = static_cast<float>(r.height()) / static_cast<float>(segs);
-
-    auto db_to_frac = [](float db) {
-        // -60..0 dBFS mapped to 0..1 with a broadcast-ish taper.
-        const float f = (db + 60.0f) / 60.0f;
-        return std::clamp(f, 0.0f, 1.0f);
-    };
-
-    if (kind_ == GainReduction) {
-        // GR grows downward from the top; blue.
-        const float gr = std::clamp(-gr_db_, 0.0f, 24.0f) / 24.0f;
-        const int lit = static_cast<int>(gr * segs);
-        for (int i = 0; i < segs; ++i) {
-            const int y = r.top() + static_cast<int>(static_cast<float>(i) * seg_h);
-            const QRect seg(r.left(), y, r.width(), static_cast<int>(seg_h) - gap);
-            p.fillRect(seg, (i < lit) ? skin_->gr_blue : skin_->led_off);
+// Mini strip readouts: LABEL over value, fixed 66 px columns.
+class MiniValues : public QWidget {
+public:
+    explicit MiniValues(QWidget* parent = nullptr) : QWidget(parent) { setFixedHeight(44); }
+    void set(const QVector<std::pair<QString, QString>>& v) {
+        values_ = v;
+        setFixedWidth(66 * static_cast<int>(v.size()));
+        update();
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        for (int i = 0; i < values_.size(); ++i) {
+            const qreal x = i * 66.0;
+            p.setFont(font_label());
+            p.setPen(Tok::t2);
+            p.drawText(QRectF(x, 0, 66, 16), Qt::AlignLeft | Qt::AlignVCenter, values_[i].first);
+            p.setFont(make_font(15, QFont::Medium));
+            p.setPen(Tok::t1);
+            draw_tabular(p, QRectF(x, 18, 66, 24), values_[i].second, Qt::AlignLeft);
         }
-        return;
     }
+private:
+    QVector<std::pair<QString, QString>> values_;
+};
 
-    const int peak_lit = static_cast<int>(db_to_frac(peak_db_) * segs);
-    const int rms_lit  = static_cast<int>(db_to_frac(rms_db_) * segs);
-    const int hold_seg = static_cast<int>(db_to_frac(hold_db_) * segs);
-
-    if (horizontal_) {
-        // Left (quiet) to right (loud), same colour zones as the vertical bar.
-        const int hsegs = 40;
-        const float seg_w = static_cast<float>(r.width()) / static_cast<float>(hsegs);
-        const int hp = static_cast<int>(db_to_frac(peak_db_) * hsegs);
-        const int hr = static_cast<int>(db_to_frac(rms_db_) * hsegs);
-        const int hh = static_cast<int>(db_to_frac(hold_db_) * hsegs);
-        for (int i = 0; i < hsegs; ++i) {
-            const int x = r.left() + static_cast<int>(static_cast<float>(i) * seg_w);
-            const QRect seg(x, r.top(), static_cast<int>(seg_w) - gap, r.height());
-            const float frac = static_cast<float>(i) / static_cast<float>(hsegs);
-            const QColor on = frac > 0.9f ? skin_->led_red : (frac > 0.75f ? skin_->led_yellow : skin_->led_green);
-            QColor c = skin_->led_off;
-            if (i < hp) c = on;
-            if (i < hr) c = on.lighter(130);
-            if (i == hh && hold_db_ > kSilenceFloor) c = skin_->accent;
-            p.fillRect(seg, c);
-        }
-        return;
-    }
-
-    for (int i = 0; i < segs; ++i) {
-        const int from_bottom = segs - 1 - i;
-        const int y = r.top() + static_cast<int>(static_cast<float>(i) * seg_h);
-        const QRect seg(r.left(), y, r.width(), static_cast<int>(seg_h) - gap);
-        QColor c = skin_->led_off;
-        const float frac = static_cast<float>(from_bottom) / static_cast<float>(segs);
-        QColor on = frac > 0.9f ? skin_->led_red : (frac > 0.75f ? skin_->led_yellow : skin_->led_green);
-        if (from_bottom < peak_lit) c = on;
-        if (from_bottom < rms_lit) c = on.lighter(130);
-        if (from_bottom == hold_seg && hold_db_ > kSilenceFloor) c = skin_->accent; // Peak hold tick.
-        p.fillRect(seg, c);
-    }
+QString fmt_unit(float v, const QString& unit) {
+    return fmt_signed(v) + QStringLiteral(" ") + unit;
 }
 
-// =============================================================================
-//  TrimFader
-// =============================================================================
-TrimFader::TrimFader(QWidget* parent) : QSlider(Qt::Vertical, parent) {
-    setRange(-240, 240);   // -24.0 .. +24.0 dB in 0.1 dB steps.
-    setValue(0);
-    setFocusPolicy(Qt::StrongFocus);
-}
-void TrimFader::set_db(float db) { setValue(static_cast<int>(std::lround(std::clamp(db, -24.0f, 24.0f) * 10.0f))); }
-float TrimFader::db() const { return static_cast<float>(value()) / 10.0f; }
-
-void TrimFader::wheelEvent(QWheelEvent* e) {
-    if (e->modifiers() & Qt::ControlModifier) {
-        const int dir = e->angleDelta().y() > 0 ? 1 : -1;
-        setValue(value() + dir);          // 0.1 dB nudge.
-        emit dbChanged(db());
-        e->accept();
-    } else {
-        e->ignore();                      // Plain wheel disabled.
-    }
-}
-void TrimFader::mouseDoubleClickEvent(QMouseEvent* e) {
-    setValue(0);                          // Snap to 0.0 dB.
-    emit dbChanged(0.0f);
-    e->accept();
-}
+} // namespace
 
 // =============================================================================
 //  ChannelStrip
 // =============================================================================
-ChannelStrip::ChannelStrip(Mode mode, const L& title, const Skin* skin, QWidget* parent)
-    : QWidget(parent), mode_(mode), title_(title), skin_(skin) {
+ChannelStrip::ChannelStrip(Mode mode, const QString& number, const QString& name, QWidget* parent)
+    : QWidget(parent), mode_(mode), number_(number), name_(name) {
+    setFixedWidth(168);
     auto* v = new QVBoxLayout(this);
-    v->setContentsMargins(4, 4, 4, 4);
-    v->setSpacing(3);
+    v->setContentsMargins(12, 40, 12, 44);
+    v->setSpacing(6);
 
-    name_ = new QLabel(title_.pick(lang_), this);
-    QFont nf = name_->font(); nf.setBold(true); nf.setPointSizeF(nf.pointSizeF() * 0.9); name_->setFont(nf);
-    name_->setAlignment(Qt::AlignHCenter);
-    name_->setStyleSheet(QStringLiteral("color:#d6d8dc;"));
+    auto* labels = new QHBoxLayout();
+    labels->setSpacing(8);
+    auto* pk = new SectionLabel(QStringLiteral("PK"), this);
+    pk->setFixedWidth(44);
+    labels->addWidget(pk);
+    labels->addWidget(new SectionLabel(QStringLiteral("DUCK"), this));
+    labels->addStretch(1);
+    v->addLayout(labels);
+
+    auto* boxes = new QHBoxLayout();
+    boxes->setSpacing(8);
+    pk_box_ = new ValueBox(this);
+    pk_box_->setFixedWidth(44);
+    duck_box_ = new ValueBox(this);
+    duck_box_->setFixedWidth(44);
+    boxes->addWidget(pk_box_);
+    boxes->addWidget(duck_box_);
+    boxes->addStretch(1);
+    v->addLayout(boxes);
+    v->addSpacing(4);
 
     auto* meters = new QHBoxLayout();
-    meters->setSpacing(2);
-    level_ = new LedMeter(LedMeter::Level, skin_, this);
-    gr_ = new LedMeter(LedMeter::GainReduction, skin_, this);
+    meters->setSpacing(3);
+    level_ = new LedMeter(LedMeter::Kind::Level, Qt::Vertical, this);
+    level_->setFixedWidth(16);
+    duck_ = new LedMeter(LedMeter::Kind::GainReduction, Qt::Vertical, this);
+    duck_->setFixedWidth(8);
     meters->addWidget(level_);
-    meters->addWidget(gr_);
-
-    readout_ = new QLabel(QStringLiteral("-∞"), this);
-    readout_->setAlignment(Qt::AlignHCenter);
-    readout_->setStyleSheet(QStringLiteral("color:#9a9da2;font-family:monospace;font-size:10px;"));
-
-    fader_ = new TrimFader(this);
-    fader_->setFixedHeight(90);
-    connect(fader_, &TrimFader::dbChanged, this, [this](float db) { emit trimMoved(mode_, db); });
-    connect(fader_, &QSlider::valueChanged, this, [this](int) { emit trimMoved(mode_, fader_->db()); });
-
-    v->addWidget(name_);
+    meters->addWidget(duck_);
+    meters->addWidget(new MeterScale(MeterScale::Kind::Level, this));
+    meters->addStretch(1);
+    fader_ = new RackFader(Qt::Vertical, -48.0f, 12.0f, RackFader::Law::Console, this);
+    fader_->setFixedWidth(62);
+    meters->addWidget(fader_);
     v->addLayout(meters, 1);
-    v->addWidget(readout_);
-    v->addWidget(fader_, 0, Qt::AlignHCenter);
+
+    auto* fv = new QHBoxLayout();
+    fv->addStretch(1);
+    fader_box_ = new ValueBox(this);
+    fader_box_->setFixedWidth(52);
+    fader_box_->set_text(QStringLiteral("0.0 dB"));
+    fv->addWidget(fader_box_);
+    v->addLayout(fv);
+
+    connect(pk_box_, &ValueBox::clicked, this, [this] { hold_ = -120.0f; level_->reset_hold(); });
+    connect(fader_, &RackFader::dbChanged, this, [this](float db) {
+        fader_box_->set_text(fmt_signed(db) + QStringLiteral(" dB"));
+        emit trimMoved(mode_, db);
+    });
 }
 
-void ChannelStrip::set_language(UiLang l) { lang_ = l; name_->setText(title_.pick(l)); }
+void ChannelStrip::update_from(float true_peak, float rms, float st_lufs, float gr, float duck, bool live) {
+    live_ = live;
+    st_lufs_ = st_lufs;
+    hold_ = std::max(hold_, true_peak);
+    level_->set_level(true_peak, rms, hold_);
+    duck_->set_gr(std::min(gr, duck));
+    pk_box_->set_text(fmt_db(hold_), hold_ > -1.0f ? Tok::red : QColor());
+    duck_box_->set_text(fmt_db(duck));
+    update();
+}
 
-void ChannelStrip::update_from(float true_peak, float peak_hold, float rms, float st_lufs,
-                               float gr, float duck, bool live) {
-    level_->set_values(true_peak, rms, peak_hold);
-    gr_->set_gr(std::min(gr, duck)); // Show whichever reduction is deeper.
-    level_->update();
-    gr_->update();
-    const QString tp = fmt_db(true_peak);
-    const QString lf = fmt_db(st_lufs);
-    readout_->setText(QStringLiteral("%1 dBTP\n%2 LUFS").arg(tp, lf));
-    readout_->setStyleSheet(live ? QStringLiteral("color:#d6d8dc;font-family:monospace;font-size:10px;")
-                                 : QStringLiteral("color:#5a5d62;font-family:monospace;font-size:10px;"));
+void ChannelStrip::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(Tok::line, 1));
+    p.setBrush(Tok::panel);
+    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6);
+    const QRectF badge(12.5, 12.5, 21, 17);
+    p.setPen(QPen(live_ ? Tok::accent : Tok::line_strong, 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(badge, 3, 3);
+    p.setFont(make_font(10, QFont::DemiBold));
+    p.drawText(badge, Qt::AlignCenter, number_);
+    p.setFont(make_font(11, QFont::DemiBold, 1.2));
+    p.setPen(live_ ? Tok::t1 : Tok::t3);
+    p.drawText(QPointF(42, 25.5), name_);
+    // Bottom: short-term loudness.
+    p.setPen(QPen(Tok::line, 1));
+    p.drawLine(QPointF(12, height() - 42.5), QPointF(width() - 12, height() - 42.5));
+    p.setFont(font_label());
+    p.setPen(Tok::t2);
+    p.drawText(QRectF(12, height() - 34, 80, 20), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("S-LUFS"));
+    p.setFont(make_font(14, QFont::Medium));
+    p.setPen(live_ ? Tok::t1 : Tok::t3);
+    draw_tabular(p, QRectF(12, height() - 36, width() - 24, 24), fmt_db(st_lufs_), Qt::AlignRight);
 }
 
 // =============================================================================
 //  CalibrationDialog
 // =============================================================================
-CalibrationDialog::CalibrationDialog(dsp::Engine* engine, const Skin* skin, UiLang lang, QWidget* parent)
-    : QDialog(parent), engine_(engine), skin_(skin), lang_(lang) {
-    setWindowTitle(lang_ == UiLang::JA ? QStringLiteral("10秒カンペ自動測定")
-                                       : QStringLiteral("10-Second Cue-Card Calibration"));
+CalibrationDialog::CalibrationDialog(dsp::Engine* engine, UiLang lang, QWidget* parent)
+    : QDialog(parent), engine_(engine), lang_(lang) {
+    install_fonts();
+    setPalette(studio_palette());
+    setAutoFillBackground(false);
     setModal(true);
-    setMinimumSize(QSize(420, 260));
-    // Same studio palette as the console (not the OS light theme).
-    setStyleSheet(QStringLiteral(
-        "QDialog{background:%1;}"
-        "QLabel{color:%2;}"
-        "QProgressBar{background:%3;border:1px solid #3a3c40;border-radius:4px;color:%2;text-align:center;height:18px;}"
-        "QProgressBar::chunk{background:%4;border-radius:3px;}"
-        "QPushButton{background:%5;color:%2;border:1px solid #3a3c40;border-radius:4px;padding:6px 18px;}"
-        "QPushButton:disabled{color:#5a5d62;}")
-        .arg(skin_->panel.name(), skin_->text.name(), skin_->led_off.name(),
-             skin_->accent.name(), skin_->ear.name()));
-    auto* v = new QVBoxLayout(this);
-    v->setContentsMargins(22, 20, 22, 18);
-    v->setSpacing(12);
-
-    const L cue{
-        QStringLiteral("Read this aloud at your normal streaming voice:\n\n"
-                       "“Hello everyone, welcome back to the stream!\nToday we've got a great show lined up.”"),
-        QStringLiteral("いつもの配信の声で読み上げてください：\n\n"
-                       "「みなさんこんばんは、配信へようこそ！\n今日も楽しい時間にしていきましょう。」")};
-    cue_ = new QLabel(cue.pick(lang_), this);
-    cue_->setWordWrap(true);
-    cue_->setAlignment(Qt::AlignCenter);
-    QFont cf = cue_->font(); cf.setPointSizeF(cf.pointSizeF() * 1.1); cue_->setFont(cf);
-
-    bar_ = new QProgressBar(this);
-    bar_->setRange(0, 1000);
-    bar_->setValue(0);
-    bar_->setTextVisible(false);   // Percent is shown in the status line (legible on amber).
-
-    status_ = new QLabel(QString(), this);
-    status_->setWordWrap(true);
-    status_->setAlignment(Qt::AlignCenter);
-
-    close_btn_ = new QPushButton(lang_ == UiLang::JA ? QStringLiteral("閉じる") : QStringLiteral("Close"), this);
-    close_btn_->setEnabled(false);
-    connect(close_btn_, &QPushButton::clicked, this, &QDialog::accept);
-
-    v->addWidget(cue_, 1);
-    v->addWidget(bar_);
-    v->addWidget(status_);
-    v->addWidget(close_btn_, 0, Qt::AlignRight);
-
+    setFixedSize(560, 400);
+    setWindowTitle(L{QStringLiteral("MODEL 600  -  Automatic Input Calibration"),
+                     QStringLiteral("MODEL 600  -  入力レベル自動測定")}.pick(lang_));
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(24, 78, 24, 24);
+    pages_ = new QStackedLayout();
+    root->addLayout(pages_);
+    build_measuring_page();
+    build_result_page();
     timer_ = new QTimer(this);
-    timer_->setInterval(50);
+    timer_->setInterval(33);
     connect(timer_, &QTimer::timeout, this, &CalibrationDialog::tick);
+}
+
+void CalibrationDialog::build_measuring_page() {
+    auto* page = new QWidget(this);
+    auto* v = new QVBoxLayout(page);
+    v->setContentsMargins(0, 0, 0, 0);
+    v->setSpacing(0);
+
+    auto* card = new PanelBox(page);
+    card->setFixedHeight(110);
+    auto* cv = new QVBoxLayout(card);
+    cv->setContentsMargins(16, 12, 16, 12);
+    cv->addWidget(new SectionLabel(L{QStringLiteral("Read aloud"), QStringLiteral("読み上げ文")}.pick(lang_), card));
+    cv->addSpacing(6);
+    const QString script = L{QStringLiteral("“Hello everyone, welcome back to the stream.\n Let's make today a great one.”"),
+                             QStringLiteral("「みなさんこんばんは、配信へようこそ。\n　今日も楽しい時間にしていきましょう。」")}.pick(lang_);
+    cv->addWidget(make_text(script, 16, QFont::Medium, Tok::t1, card));
+    cv->addStretch(1);
+    v->addWidget(card);
+    v->addSpacing(20);
+
+    auto* in_row = new QHBoxLayout();
+    auto* in_label = new SectionLabel(QStringLiteral("INPUT"), page);
+    in_label->setFixedWidth(72);
+    in_row->addWidget(in_label);
+    input_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Horizontal, page);
+    input_meter_->setFixedHeight(12);
+    in_row->addWidget(input_meter_, 1);
+    v->addLayout(in_row);
+    v->addSpacing(22);
+
+    auto* pr_row = new QHBoxLayout();
+    auto* pr_label = new SectionLabel(QStringLiteral("PROGRESS"), page);
+    pr_label->setFixedWidth(72);
+    pr_row->addWidget(pr_label);
+    progress_ = new Progress(page);
+    pr_row->addWidget(progress_, 1);
+    pr_row->addSpacing(16);
+    time_label_ = make_text(QString(), 11, QFont::Medium, Tok::t1, page);
+    time_label_->setFixedWidth(96);
+    time_label_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    pr_row->addWidget(time_label_);
+    v->addLayout(pr_row);
+    v->addSpacing(28);
+
+    v->addWidget(make_text(L{QStringLiteral("Keep reading at your normal streaming volume."),
+                             QStringLiteral("普段の配信と同じ声の大きさで、そのまま読み続けてください。")}.pick(lang_),
+                           12, QFont::Medium, Tok::t2, page, true));
+    v->addStretch(1);
+    auto* buttons = new QHBoxLayout();
+    buttons->addStretch(1);
+    auto* cancel = new RackKey(L{QStringLiteral("Cancel"), QStringLiteral("中止")}.pick(lang_), page);
+    cancel->setFixedSize(96, 34);
+    connect(cancel, &RackKey::clicked, this, &CalibrationDialog::reject);
+    buttons->addWidget(cancel);
+    v->addLayout(buttons);
+    pages_->addWidget(page);
+}
+
+void CalibrationDialog::build_result_page() {
+    auto* page = new QWidget(this);
+    auto* outer = new QVBoxLayout(page);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* h = new QHBoxLayout();
+    h->setSpacing(14);
+    auto* bar = new ColorBar(page);
+    result_bar_ = bar;
+    h->addWidget(bar);
+    auto* v = new QVBoxLayout();
+    v->setSpacing(4);
+    title_ = make_text(QString(), 15, QFont::DemiBold, Tok::t1, page);
+    body_ = make_text(QString(), 12, QFont::Medium, Tok::t2, page, true);
+    v->addWidget(title_);
+    v->addWidget(body_);
+    v->addSpacing(12);
+    auto* readouts = new QHBoxLayout();
+    readouts->setSpacing(8);
+    r1_ = new Readout(QString(), QString(), false, page);
+    r2_ = new Readout(QString(), QString(), false, page);
+    r3_ = new Readout(QString(), QString(), false, page);
+    for (Readout* r : {r1_, r2_, r3_}) { r->setFixedSize(148, 60); readouts->addWidget(r); }
+    readouts->addStretch(1);
+    v->addLayout(readouts);
+    v->addSpacing(10);
+    auto* knob_row = new QHBoxLayout();
+    knob_ = new KnobView(page);
+    knob_row->addWidget(knob_);
+    knob_row->addSpacing(8);
+    knob_text_ = make_text(QString(), 12, QFont::Medium, Tok::t1, page, true);
+    knob_row->addWidget(knob_text_, 1);
+    v->addLayout(knob_row);
+    measured_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Horizontal, page);
+    measured_meter_->set_scale_visible(true);
+    measured_meter_->setFixedHeight(32);
+    v->addWidget(measured_meter_);
+    v->addStretch(1);
+    h->addLayout(v, 1);
+    outer->addLayout(h, 1);
+    auto* buttons = new QHBoxLayout();
+    buttons->addStretch(1);
+    secondary_ = new RackKey(QString(), page);
+    primary_ = new RackKey(QString(), page);
+    primary_->set_style(RackKey::Style::Primary);
+    secondary_->setFixedSize(96, 34);
+    primary_->setFixedSize(96, 34);
+    buttons->addWidget(secondary_);
+    buttons->addSpacing(8);
+    buttons->addWidget(primary_);
+    outer->addLayout(buttons);
+    pages_->addWidget(page);
 }
 
 void CalibrationDialog::showEvent(QShowEvent* e) {
     QDialog::showEvent(e);
-    if (running_) return;
-    running_ = true;
+    if (!started_) start();
+}
+
+void CalibrationDialog::start() {
+    started_ = true;
+    state_ = State::Measuring;
+    pages_->setCurrentIndex(0);
     engine_->start_calibration(10.0f);
-    status_->setText(lang_ == UiLang::JA ? QStringLiteral("測定中... 声を出し続けてください")
-                                         : QStringLiteral("Measuring... keep talking"));
+    engine_->telemetry().reset_holds();
+    input_meter_->reset_hold();
     timer_->start();
+    update();
+}
+
+void CalibrationDialog::reject() {
+    if (state_ == State::Measuring && engine_->calibrator().running()) engine_->calibrator().reset();
+    timer_->stop();
+    QDialog::reject();
 }
 
 void CalibrationDialog::tick() {
     auto& c = engine_->calibrator();
-    bar_->setValue(static_cast<int>(c.progress() * 1000.0f));
-    if (c.done()) { timer_->stop(); finish(); return; }
-    const int pct = static_cast<int>(c.progress() * 100.0f);
-    status_->setText(lang_ == UiLang::JA
-        ? QStringLiteral("測定中... 声を出し続けてください（%1%）").arg(pct)
-        : QStringLiteral("Measuring... keep talking (%1%)").arg(pct));
+    auto& t = engine_->telemetry();
+    input_meter_->set_level(t.true_peak_db.load(), t.rms_db.load(), t.peak_hold_db.load());
+    static_cast<Progress*>(progress_)->set_value(c.progress());
+    time_label_->setText(QStringLiteral("%1 / 10.0 %2")
+        .arg(QString::number(static_cast<double>(c.progress()) * 10.0, 'f', 1).rightJustified(4, QLatin1Char('0')),
+             L{QStringLiteral("s"), QStringLiteral("秒")}.pick(lang_)));
+    if (c.done()) { timer_->stop(); show_result(); }
 }
 
-void CalibrationDialog::finish() {
+void CalibrationDialog::show_result() {
     auto& c = engine_->calibrator();
-    QString msg;
+    const bool ja = lang_ == UiLang::JA;
+    secondary_->disconnect();
+    primary_->disconnect();
+    r3_->setVisible(true);
+    knob_->setVisible(true);
+    knob_text_->setVisible(true);
+    measured_meter_->setVisible(false);
     if (c.result_clipped()) {
-        msg = lang_ == UiLang::JA
-            ? QStringLiteral("\U0001F6A8 オーディオIF本体の物理GAINツマミが割れ(赤ランプ)ています！ツマミを左に回してください。")
-            : QStringLiteral("\U0001F6A8 Your audio interface input is clipping (red light)! Turn the physical GAIN knob down (left).");
-    } else if (c.result_silent()) {
-        msg = lang_ == UiLang::JA
-            ? QStringLiteral("声が検出されませんでした（ミュート等を確認してください）。測定値は適用しません。")
-            : QStringLiteral("No voice detected (check mute/input). No change applied.");
-    } else if (c.result_ok()) {
-        engine_->commit_calibration();
-        const float g = c.result_gain_db();
-        const QString knob = (g > 6.0f)
-            ? (lang_ == UiLang::JA ? QStringLiteral("ツマミは12時〜1時方向が最適です。") : QStringLiteral("Aim the knob at the 12-1 o'clock position."))
-            : (lang_ == UiLang::JA ? QStringLiteral("ツマミは1時〜2時方向が最適です。") : QStringLiteral("Aim the knob at the 1-2 o'clock position."));
-        msg = (lang_ == UiLang::JA
-            ? QStringLiteral("✅ 測定完了。入力ゲインを %1 dB に設定しました（基準ピーク %2 dBFS）。%3")
-            : QStringLiteral("✅ Done. Input gain set to %1 dB (reference peak %2 dBFS). %3"))
-            .arg(QString::number(static_cast<double>(g), 'f', 1),
-                 QString::number(static_cast<double>(c.result_reference_db()), 'f', 1), knob);
+        state_ = State::Clipped;
+        static_cast<ColorBar*>(result_bar_)->set_color(Tok::error);
+        title_->setText(ja ? QStringLiteral("入力が歪んでいます") : QStringLiteral("The input is clipping"));
+        body_->setText(ja ? QStringLiteral("オーディオインターフェース本体の GAIN つまみを下げてから、\nもう一度測定してください。クリップランプが点かない位置が目安です。")
+                          : QStringLiteral("Turn down the GAIN knob on your audio interface, then measure again. Aim for a position where the clip light stays off."));
+        r1_->set_label(QStringLiteral("CLIPPED"));
+        r1_->set_unit(ja ? QStringLiteral("秒") : QStringLiteral("s"));
+        r1_->set_value(QString::number(static_cast<double>(c.clipped_seconds()), 'f', 1), Tok::error);
+        r2_->set_label(QStringLiteral("INPUT GAIN"));
+        r2_->set_unit(ja ? QStringLiteral("dB（変更なし）") : QStringLiteral("dB unchanged"));
+        r2_->set_value(fmt_signed(engine_->params().input_gain_db.load()));
+        r3_->setVisible(false);
+        knob_->set_pointer(120);
+        knob_->set_turn_down_hint(true);
+        knob_text_->setText(ja ? QStringLiteral("つまみを左へ回して\nクリップランプを消してください。")
+                               : QStringLiteral("Turn the knob left until\nthe clip light stays off."));
+        secondary_->setText(ja ? QStringLiteral("閉じる") : QStringLiteral("Close"));
+        primary_->setText(ja ? QStringLiteral("再測定") : QStringLiteral("Measure"));
+        connect(secondary_, &RackKey::clicked, this, &CalibrationDialog::reject);
+        connect(primary_, &RackKey::clicked, this, &CalibrationDialog::start);
+    } else if (c.result_silent() || !c.result_ok()) {
+        state_ = State::NoVoice;
+        static_cast<ColorBar*>(result_bar_)->set_color(Tok::warn);
+        title_->setText(ja ? QStringLiteral("声を検出できませんでした") : QStringLiteral("No voice was detected"));
+        body_->setText(ja ? QStringLiteral("マイクのミュートと、OBS の入力デバイスの選択を確認してください。\n入力ゲインは変更していません。")
+                          : QStringLiteral("Check that your mic is not muted and that OBS uses the right input device. The input gain was not changed."));
+        r1_->set_label(QStringLiteral("VOICE DETECTED"));
+        r1_->set_unit(QStringLiteral("%"));
+        r1_->set_value(QString::number(static_cast<int>(std::lround(c.voice_ratio() * 100.0f))), Tok::warn);
+        r2_->set_label(QStringLiteral("REQUIRED"));
+        r2_->set_unit(ja ? QStringLiteral("% 以上") : QStringLiteral("% min"));
+        r2_->set_value(QStringLiteral("20"));
+        r3_->setVisible(false);
+        knob_->setVisible(false);
+        knob_text_->setVisible(false);
+        const auto& t = engine_->telemetry();
+        measured_meter_->set_level(t.peak_hold_db.load(), t.rms_db.load(), t.peak_hold_db.load());
+        measured_meter_->setVisible(true);
+        secondary_->setText(ja ? QStringLiteral("閉じる") : QStringLiteral("Close"));
+        primary_->setText(ja ? QStringLiteral("再測定") : QStringLiteral("Measure"));
+        connect(secondary_, &RackKey::clicked, this, &CalibrationDialog::reject);
+        connect(primary_, &RackKey::clicked, this, &CalibrationDialog::start);
     } else {
-        msg = lang_ == UiLang::JA ? QStringLiteral("測定に失敗しました。もう一度お試しください。")
-                                  : QStringLiteral("Measurement failed. Please try again.");
+        state_ = State::Success;
+        engine_->commit_calibration();
+        static_cast<ColorBar*>(result_bar_)->set_color(Tok::ok);
+        title_->setText(ja ? QStringLiteral("測定が完了しました") : QStringLiteral("Calibration complete"));
+        body_->setText(ja ? QStringLiteral("入力ゲインを自動で設定しました。") : QStringLiteral("The input gain has been set automatically."));
+        r1_->set_label(QStringLiteral("INPUT GAIN"));
+        r1_->set_unit(QStringLiteral("dB"));
+        r1_->set_value(fmt_signed(c.result_gain_db()));
+        r2_->set_label(QStringLiteral("REF. PEAK"));
+        r2_->set_unit(QStringLiteral("dBFS"));
+        r2_->set_value(fmt_db(c.result_reference_db()));
+        r3_->set_label(QStringLiteral("TARGET PEAK"));
+        r3_->set_unit(QStringLiteral("dBFS"));
+        r3_->set_value(fmt_db(c.target_peak_db()));
+        knob_->set_turn_down_hint(false);
+        knob_->set_ok_range(30, 60);
+        knob_->set_pointer(45);
+        const bool low = c.result_gain_db() > 12.0f;
+        knob_text_->setText(low
+            ? (ja ? QStringLiteral("入力が小さめです。GAIN つまみを少し右へ回すと\nさらに安定します（目安は1時〜2時）。")
+                  : QStringLiteral("Your input is low. Turn the GAIN knob slightly right\nfor more headroom (aim for 1 to 2 o'clock)."))
+            : (ja ? QStringLiteral("オーディオインターフェースの GAIN つまみは\n1時〜2時の位置が目安です。")
+                  : QStringLiteral("Set the GAIN knob on your audio interface\naround the 1 to 2 o'clock position.")));
+        secondary_->setText(ja ? QStringLiteral("再測定") : QStringLiteral("Measure"));
+        primary_->setText(ja ? QStringLiteral("完了") : QStringLiteral("Done"));
+        connect(secondary_, &RackKey::clicked, this, &CalibrationDialog::start);
+        connect(primary_, &RackKey::clicked, this, &CalibrationDialog::accept);
     }
-    status_->setText(msg);
-    close_btn_->setEnabled(true);
+    pages_->setCurrentIndex(1);
+    update();
+}
+
+void CalibrationDialog::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.fillRect(rect(), Tok::faceplate);
+    p.setFont(make_font(14, QFont::DemiBold));
+    p.setPen(Tok::t1);
+    p.drawText(QPointF(24, 34), L{QStringLiteral("Automatic Input Calibration"), QStringLiteral("入力レベル自動測定")}.pick(lang_));
+    const QStringList steps = lang_ == UiLang::JA
+        ? QStringList{QStringLiteral("準備"), QStringLiteral("測定"), QStringLiteral("結果")}
+        : QStringList{QStringLiteral("Prepare"), QStringLiteral("Measure"), QStringLiteral("Result")};
+    const int cur = state_ == State::Measuring ? 1 : 2;
+    for (int i = 0; i < 3; ++i) {
+        const qreal x = width() - 24 - (3 - i) * 72;
+        const QColor col = i == cur ? Tok::accent : (i < cur ? Tok::t2 : Tok::t3);
+        p.setPen(Qt::NoPen);
+        p.setBrush(i <= cur ? col : Tok::line);
+        p.drawRoundedRect(QRectF(x, 24, 64, 3), 1.5, 1.5);
+        p.setFont(make_font(10, i == cur ? QFont::DemiBold : QFont::Medium));
+        p.setPen(col);
+        p.drawText(QPointF(x, 42), QStringLiteral("%1  %2").arg(i + 1).arg(steps[i]));
+    }
+    p.setPen(QPen(Tok::line, 1));
+    p.drawLine(QPointF(0, 58.5), QPointF(width(), 58.5));
 }
 
 // =============================================================================
@@ -315,455 +527,572 @@ void CalibrationDialog::finish() {
 // =============================================================================
 StudioConsole::StudioConsole(dsp::Engine* engine, SharedBus* bus, bool director, bool pro, QWidget* parent)
     : QDialog(parent), engine_(engine), bus_(bus), director_(director && pro), pro_(pro) {
-    setWindowTitle(QStringLiteral("MODEL 600 // BROADCAST SUITE  —  STUDIO CONSOLE"));
-    setMaximumHeight(560);
-    setMinimumWidth(director_ ? 900 : 520);
+    install_fonts();
+    setPalette(studio_palette());
+    setFont(font_body());
+    setWindowTitle(QStringLiteral("MODEL 600  -  %1 %2").arg(unit_number(), unit_name()));
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     build_ui();
     timer_ = new QTimer(this);
-    timer_->setInterval(33); // ~30 fps.
+    timer_->setInterval(33);   // ~30 fps, only while visible.
     connect(timer_, &QTimer::timeout, this, &StudioConsole::refresh);
+    if (director_) { setMinimumSize(1080, 120); resize(1120, 560); }
+    else           { setMinimumSize(540, 120); resize(560, 560); }
+    setMaximumHeight(560);
 }
 
 StudioConsole::~StudioConsole() = default;
 
+QString StudioConsole::unit_number() const {
+    if (director_) return QStringLiteral("05");
+    switch (engine_->mode()) {
+        case MODE_COLLAB: return QStringLiteral("02");
+        case MODE_GAME: return QStringLiteral("03");
+        case MODE_BGM: return QStringLiteral("04");
+        case MODE_DIRECTOR: return QStringLiteral("05");
+        default: return QStringLiteral("01");
+    }
+}
+
+QString StudioConsole::unit_name() const {
+    if (director_) return QStringLiteral("STREAM DIRECTOR");
+    switch (engine_->mode()) {
+        case MODE_COLLAB: return QStringLiteral("COLLAB RIDER");
+        case MODE_GAME: return QStringLiteral("GAME IMPACT");
+        case MODE_BGM: return QStringLiteral("BGM POCKET");
+        case MODE_DIRECTOR: return QStringLiteral("STREAM DIRECTOR");
+        default: return QStringLiteral("VOCAL MASTER");
+    }
+}
+
+void StudioConsole::changed() { if (on_params_changed) on_params_changed(); }
+
 void StudioConsole::build_ui() {
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(30, 8, 30, 10);   // Clears the rack ears.
-    root->setSpacing(6);
+    root->setContentsMargins(kEar, 0, kEar, 0);
+    root->setSpacing(0);
 
-    header_box_ = new QWidget(this);
-    auto* header = new QVBoxLayout(header_box_);
-    header->setContentsMargins(0, 0, 0, 0);
-    header->setSpacing(4);
-    build_header(header);
-    root->addWidget(header_box_);
+    header_ = new HeaderBar(this);
+    header_->set_unit(unit_number(), unit_name());
+    root->addWidget(header_);
+    connect(header_->pin_key(), &RackKey::toggled, this, &StudioConsole::toggle_pin);
+    connect(header_->fold_key(), &RackKey::toggled, this, &StudioConsole::toggle_mini);
+    connect(header_->reset_key(), &RackKey::clicked, this, &StudioConsole::panic_reset);
+    connect(header_->lang(), &SegmentedControl::currentChanged, this,
+            [this](int i) { set_language(i == 0 ? UiLang::JA : UiLang::EN); });
+    connect(header_, &HeaderBar::updateClicked, this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.seventhwell.com/model600/download")));
+    });
 
-    // UNIT 01 consoles show the voice controls; the UNIT 05 console is the
-    // integrated mixer only (its own engine is the metering master, not a mic).
-    body_box_ = new QWidget(this);
-    auto* body = new QVBoxLayout(body_box_);
-    body->setContentsMargins(0, 0, 0, 0);
-    if (director_) build_unit05(body);
-    else           build_unit01(body);
-    root->addWidget(body_box_, 1);
+    body_ = director_ ? build_director_body() : build_unit_body();
+    root->addWidget(body_, 1);
+    mini_bar_ = build_mini_bar();
+    mini_bar_->setVisible(false);
+    root->addWidget(mini_bar_);
 
-    build_mini_bar(root);
+    status_ = new StatusLine(this);
+    if (director_) {
+        connect(status_, &StatusLine::linkClicked, this, [this] {
+            QMenu menu(this);
+            menu.setPalette(studio_palette());
+            menu.setFont(font_body());
+            QAction* deact = menu.addAction(lang_ == UiLang::JA ? QStringLiteral("このPCの認証を解除…")
+                                                                : QStringLiteral("Deactivate this PC..."));
+            if (menu.exec(QCursor::pos()) != deact) return;
+            const auto answer = QMessageBox::question(this, QStringLiteral("MODEL 600"),
+                lang_ == UiLang::JA ? QStringLiteral("このPCのライセンス認証を解除しますか？\n別のPCで使うときに行います。")
+                                    : QStringLiteral("Deactivate the licence on this PC?\nDo this before moving to another PC."));
+            if (answer == QMessageBox::Yes && on_deactivate_pc) on_deactivate_pc();
+        });
+    }
+    root->addWidget(status_);
     relabel();
 }
 
-void StudioConsole::build_mini_bar(QVBoxLayout* into) {
-    mini_bar_ = new QWidget(this);
-    auto* v = new QVBoxLayout(mini_bar_);
-    v->setContentsMargins(10, 6, 10, 6);
-    v->setSpacing(4);
-    mini_meter_ = new LedMeter(LedMeter::Level, &skin_, mini_bar_);
-    mini_meter_->set_horizontal(true);
-    mini_readout_ = new QLabel(QString(), mini_bar_);
-    mini_readout_->setStyleSheet(QStringLiteral("color:#d6d8dc;font-family:monospace;"));
-    v->addWidget(mini_meter_);
-    v->addWidget(mini_readout_);
-    mini_bar_->setVisible(false);
-    into->addWidget(mini_bar_);
+QWidget* StudioConsole::build_param_row(QWidget* parent, RackFader*& fader, ValueBox*& box, float lo, float hi,
+                                        const QVector<float>& marks, float value, const QString& unit) {
+    auto* row = new QWidget(parent);
+    auto* h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    h->setSpacing(12);
+    fader = new RackFader(Qt::Horizontal, lo, hi, RackFader::Law::Linear, row);
+    fader->set_marks(marks);
+    fader->set_default_db(value);
+    fader->set_db(value);
+    box = new ValueBox(row);
+    box->setFixedWidth(84);
+    box->set_text(fmt_unit(value, unit));
+    h->addWidget(fader, 1);
+    h->addWidget(box, 0, Qt::AlignTop);
+    return row;
 }
 
-static QPushButton* make_header_btn(const QString& text, const Skin& s) {
-    auto* b = new QPushButton(text);
-    b->setCheckable(true);
-    b->setCursor(Qt::PointingHandCursor);
-    b->setStyleSheet(QStringLiteral(
-        "QPushButton{background:%1;color:%2;border:1px solid #3a3c40;border-radius:4px;padding:3px 8px;}"
-        "QPushButton:checked{background:%3;color:#1a1a1a;font-weight:bold;}")
-        .arg(s.ear.name(), s.text.name(), s.accent.name()));
-    return b;
-}
-
-void StudioConsole::build_header(QVBoxLayout* into) {
-    // Row 1: brand + (when available) the amber update lamp.
-    auto* row1 = new QHBoxLayout();
-    auto* brand = new QLabel(QStringLiteral("SEVENTHWELL  \u2502  MODEL 600"));
-    QFont bf = brand->font(); bf.setBold(true); brand->setFont(bf);
-    brand->setStyleSheet(QStringLiteral("color:%1;letter-spacing:1px;").arg(skin_.accent.name()));
-    row1->addWidget(brand);
-    row1->addStretch(1);
-
-    // Row 2: LINK MATRIX lamps + window buttons.
-    auto* row2 = new QHBoxLayout();
-    link_matrix_ = new QLabel(QStringLiteral("LINK"));
-    link_matrix_->setTextFormat(Qt::RichText);
-    link_matrix_->setStyleSheet(QStringLiteral("color:#5a5d62;font-size:11px;"));
-    row2->addWidget(link_matrix_);
-    row2->addStretch(1);
-
-    pin_btn_ = make_header_btn(QStringLiteral("\U0001F4CC PIN"), skin_);
-    mini_btn_ = make_header_btn(QStringLiteral("\U0001F5D5 MINI"), skin_);
-    lang_btn_ = make_header_btn(QStringLiteral("JP/EN"), skin_);
-    reset_btn_ = make_header_btn(QStringLiteral("↺ RESET"), skin_);
-    reset_btn_->setCheckable(false);
-    update_btn_ = make_header_btn(QStringLiteral("⚡ UPDATE"), skin_);
-    update_btn_->setCheckable(false);
-    update_btn_->setVisible(false);
-
-    connect(pin_btn_, &QPushButton::clicked, this, &StudioConsole::toggle_pin);
-    connect(mini_btn_, &QPushButton::clicked, this, &StudioConsole::toggle_mini);
-    connect(lang_btn_, &QPushButton::clicked, this, &StudioConsole::toggle_language);
-    connect(reset_btn_, &QPushButton::clicked, this, &StudioConsole::panic_reset);
-
-    row1->addWidget(update_btn_);
-    row2->addWidget(pin_btn_);
-    row2->addWidget(mini_btn_);
-    row2->addWidget(lang_btn_);
-    row2->addWidget(reset_btn_);
-    into->addLayout(row1);
-    into->addLayout(row2);
-}
-
-static QComboBox* make_combo(QWidget* p) {
-    auto* c = new QComboBox(p);
-    c->setStyleSheet(QStringLiteral("QComboBox{background:#2c2e32;color:#d6d8dc;border:1px solid #3a3c40;border-radius:3px;padding:2px 6px;}"));
-    return c;
-}
-
-void StudioConsole::build_unit01(QVBoxLayout* into) {
-    unit01_box_ = new QWidget(this);
-    auto* box = new QVBoxLayout(unit01_box_);
-    box->setContentsMargins(10, 8, 10, 10);
-    box->setSpacing(6);
-
-    auto* title = new QLabel(QStringLiteral("[01] VOCAL MASTER"));
-    QFont tf = title->font(); tf.setBold(true); title->setFont(tf);
-    title->setStyleSheet(QStringLiteral("color:%1;").arg(skin_.text.name()));
-    box->addWidget(title);
-
-    auto* meters = new QHBoxLayout();
-    mic_level_ = new LedMeter(LedMeter::Level, &skin_, unit01_box_);
-    mic_gr_ = new LedMeter(LedMeter::GainReduction, &skin_, unit01_box_);
-    mic_level_->setFixedWidth(26);
-    mic_gr_->setFixedWidth(26);
-    auto* mcol = new QVBoxLayout();
-    mic_readout_ = new QLabel(QStringLiteral("-∞ dBTP"), unit01_box_);
-    mic_readout_->setStyleSheet(QStringLiteral("color:#d6d8dc;font-family:monospace;"));
-    mic_hint_ = new QLabel(QString(), unit01_box_);
-    mic_hint_->setWordWrap(true);
-    mic_hint_->setStyleSheet(QStringLiteral("color:%1;font-size:11px;").arg(skin_.accent.name()));
-    mcol->addWidget(mic_readout_);
-    mcol->addWidget(mic_hint_, 1);
-    meters->addWidget(mic_level_);
-    meters->addWidget(mic_gr_);
-    meters->addLayout(mcol, 1);
-    box->addLayout(meters, 1);   // Meters absorb spare height (taller = finer reading).
-
-    auto* grid = new QGridLayout();
-    character_ = make_combo(unit01_box_);
-    character_->addItems({QStringLiteral("SOFT / ASMR"), QStringLiteral("BROADCAST"), QStringLiteral("FPS / LOUD")});
-    character_->setCurrentIndex(engine_->params().character.load());
-    connect(character_, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            [this](int i) { engine_->params().character.store(i); if (on_params_changed) on_params_changed(); });
-
-    space_fx_ = make_combo(unit01_box_);
-    space_fx_->addItems({QStringLiteral("DRY"), QStringLiteral("KARAOKE"), QStringLiteral("BATH"),
-                         QStringLiteral("HALL"), QStringLiteral("CAVE"), QStringLiteral("RADIO")});
-    space_fx_->setCurrentIndex(engine_->params().space_fx.load());
-    connect(space_fx_, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            [this](int i) { engine_->params().space_fx.store(i); if (on_params_changed) on_params_changed(); });
-
-    char_lbl_ = new QLabel(unit01_box_);
-    fx_lbl_ = new QLabel(unit01_box_);
-    char_lbl_->setStyleSheet(QStringLiteral("color:#9a9da2;"));
-    fx_lbl_->setStyleSheet(QStringLiteral("color:#9a9da2;"));
-    grid->addWidget(char_lbl_, 0, 0); grid->addWidget(character_, 0, 1);
-    grid->addWidget(fx_lbl_, 1, 0); grid->addWidget(space_fx_, 1, 1);
-    grid->setColumnStretch(1, 1);
-    box->addLayout(grid);
-
-    auto* actions = new QHBoxLayout();
-    calib_btn_ = new QPushButton(QStringLiteral("\U0001F3A4 10s CALIBRATE"), unit01_box_);
-    audition_btn_ = new QPushButton(QStringLiteral("\U0001F501 A/B AUDITION"), unit01_box_);
-    const QString action_style = QStringLiteral(
-        "QPushButton{background:#2c2e32;color:#d6d8dc;border:1px solid #3a3c40;border-radius:4px;padding:6px;}"
-        "QPushButton:checked{background:%1;color:#1a1a1a;}").arg(skin_.accent.name());
-    calib_btn_->setStyleSheet(action_style);
-    audition_btn_->setStyleSheet(action_style);
-    audition_btn_->setCheckable(true);
-    connect(calib_btn_, &QPushButton::clicked, this, &StudioConsole::run_calibration);
-    connect(audition_btn_, &QPushButton::clicked, this, &StudioConsole::start_audition);
-    actions->addWidget(calib_btn_);
-    actions->addWidget(audition_btn_);
-    box->addLayout(actions);
-
-    auto* emergency = new QHBoxLayout();
-    bleep_btn_ = new QPushButton(QStringLiteral("\U0001F92C 1kHz BLEEP"), unit01_box_);
-    cough_btn_ = new QPushButton(QStringLiteral("\U0001F927 COUGH MUTE"), unit01_box_);
-    bleep_btn_->setStyleSheet(QStringLiteral("QPushButton{background:#5a2c2c;color:#f0d0d0;border-radius:4px;padding:6px;}"));
-    cough_btn_->setStyleSheet(QStringLiteral("QPushButton{background:#3a3c50;color:#d0d4f0;border-radius:4px;padding:6px;}"));
-    connect(bleep_btn_, &QPushButton::pressed, this, &StudioConsole::fire_bleep);
-    connect(bleep_btn_, &QPushButton::released, this, [this] { engine_->bleep().stop(); });
-    connect(cough_btn_, &QPushButton::pressed, this, &StudioConsole::hold_cough);
-    connect(cough_btn_, &QPushButton::released, this, [this] { engine_->cough().release(); });
-    emergency->addWidget(bleep_btn_);
-    emergency->addWidget(cough_btn_);
-    box->addLayout(emergency);
-
-    auto* trim_row = new QHBoxLayout();
-    trim_lbl_ = new QLabel(unit01_box_);
-    trim_lbl_->setStyleSheet(QStringLiteral("color:#9a9da2;"));
-    mic_trim_ = new TrimFader(unit01_box_);
-    mic_trim_->setOrientation(Qt::Horizontal);
-    mic_trim_->set_db(engine_->params().output_trim_db.load());
-    connect(mic_trim_, &TrimFader::valueChanged, this, [this](int) {
-        const float db = mic_trim_->db();
+QWidget* StudioConsole::build_trim_row(QWidget* parent) {
+    QWidget* row = build_param_row(parent, trim_, trim_box_, -24.0f, 24.0f, {-24, -12, 0, 12, 24},
+                                   engine_->params().output_trim_db.load(), QStringLiteral("dB"));
+    trim_->set_default_db(0.0f);
+    connect(trim_, &RackFader::dbChanged, this, [this](float db) {
         engine_->params().output_trim_db.store(db);
-        if (bus_) bus_->push_trim(MODE_VOICE, db);
-        if (on_params_changed) on_params_changed();
+        if (bus_) bus_->push_trim(engine_->mode(), db);
+        trim_box_->set_text(fmt_unit(db, QStringLiteral("dB")));
+        changed();
     });
-    trim_row->addWidget(trim_lbl_);
-    trim_row->addWidget(mic_trim_, 1);
-    box->addLayout(trim_row);
-
-    into->addWidget(unit01_box_, 1);
+    return row;
 }
 
-void StudioConsole::attach_strip(ChannelStrip* strip) {
-    connect(strip, &ChannelStrip::trimMoved, this, [this](Mode m, float db) {
-        if (bus_) bus_->push_trim(m, db);
-    });
-}
+QWidget* StudioConsole::build_unit_body() {
+    auto& prm = engine_->params();
+    const Mode mode = engine_->mode();
+    auto* body = new QWidget(this);
+    auto* h = new QHBoxLayout(body);
+    h->setContentsMargins(16, 16, 16, 10);
+    h->setSpacing(18);
 
-void StudioConsole::build_unit05(QVBoxLayout* into) {
-    unit05_box_ = new QWidget(this);
-    auto* box = new QVBoxLayout(unit05_box_);
-    box->setContentsMargins(10, 8, 10, 10);
-    box->setSpacing(6);
-
-    unit05_title_ = new QLabel(unit05_box_);
-    QFont tf = unit05_title_->font(); tf.setBold(true); unit05_title_->setFont(tf);
-    unit05_title_->setStyleSheet(QStringLiteral("color:%1;").arg(skin_.text.name()));
-    box->addWidget(unit05_title_);
-
-    auto* strips = new QHBoxLayout();
-    strips->setSpacing(4);
-    const L names[4] = {
-        {QStringLiteral("01 VOCAL"), QStringLiteral("01 声")},
-        {QStringLiteral("02 COLLAB"), QStringLiteral("02 通話")},
-        {QStringLiteral("03 GAME"), QStringLiteral("03 ゲーム")},
-        {QStringLiteral("04 BGM"), QStringLiteral("04 BGM")}};
-    const Mode modes[4] = {MODE_VOICE, MODE_COLLAB, MODE_GAME, MODE_BGM};
-    for (int i = 0; i < 4; ++i) {
-        strips_[static_cast<std::size_t>(i)] = new ChannelStrip(modes[i], names[i], &skin_, unit05_box_);
-        attach_strip(strips_[static_cast<std::size_t>(i)]);
-        strips->addWidget(strips_[static_cast<std::size_t>(i)]);
-    }
-
-    // Virtual master sum column.
-    auto* master = new QVBoxLayout();
-    master_title_ = new QLabel(unit05_box_);
-    master_title_->setStyleSheet(QStringLiteral("color:#9a9da2;font-size:11px;"));
-    master_title_->setMinimumWidth(190);
-    master_lufs_ = new QLabel(QStringLiteral("M -∞  S -∞\nI -∞ LUFS"), unit05_box_);
-    master_lufs_->setStyleSheet(QStringLiteral("color:#d6d8dc;font-family:monospace;"));
-    golden_zone_ = new QLabel(QStringLiteral("—"), unit05_box_);
-    golden_zone_->setStyleSheet(QStringLiteral("color:#5a5d62;font-weight:bold;"));
-    phase_corr_ = new QLabel(QStringLiteral("Phase +1.00"), unit05_box_);
-    phase_corr_->setStyleSheet(QStringLiteral("color:#d6d8dc;font-family:monospace;"));
-    mono_check_ = new QCheckBox(QStringLiteral("Mono Check"), unit05_box_);
-    mono_check_->setStyleSheet(QStringLiteral("color:#d6d8dc;"));
-    mono_check_->setChecked(engine_->params().mono_check.load() != 0);
-    connect(mono_check_, &QCheckBox::toggled, this, [this](bool on) {
-        engine_->params().mono_check.store(on ? 1 : 0);
-    });
-    master->addWidget(master_title_);
-    master->addWidget(master_lufs_);
-    master->addWidget(golden_zone_);
-    master->addWidget(phase_corr_);
-    master->addWidget(mono_check_);
-    master->addStretch(1);
-    strips->addLayout(master);
-    box->addLayout(strips, 1);
-
-    // Scene macros.
-    auto* macros = new QHBoxLayout();
-    const char* macro_labels[4] = {"FPS/GAME", "TALK", "SINGING", "ASMR"};
-    for (int i = 0; i < 4; ++i) {
-        scene_btns_[i] = new QPushButton(QString::fromLatin1(macro_labels[i]), unit05_box_);
-        scene_btns_[i]->setStyleSheet(QStringLiteral("QPushButton{background:#2c2e32;color:#d6d8dc;border:1px solid #3a3c40;border-radius:4px;padding:5px;}"));
-        connect(scene_btns_[i], &QPushButton::clicked, this, [this, i] {
-            engine_->params().apply_scene(i);
-            if (character_) character_->setCurrentIndex(engine_->params().character.load());
-            if (space_fx_) space_fx_->setCurrentIndex(engine_->params().space_fx.load());
-            if (on_scene_macro) on_scene_macro(i);
-            if (on_params_changed) on_params_changed();
-        });
-        macros->addWidget(scene_btns_[i]);
-    }
-    box->addLayout(macros);
-
-    auto* exports = new QHBoxLayout();
-    chapter_btn_ = new QPushButton(QStringLiteral("\U0001F4D1 CHAPTER MARK"), unit05_box_);
-    karte_btn_ = new QPushButton(QStringLiteral("\U0001F4CA EXPORT KARTE"), unit05_box_);
-    const QString export_style = QStringLiteral(
-        "QPushButton{background:#2c2e32;color:#d6d8dc;border:1px solid #3a3c40;border-radius:4px;padding:6px;}");
-    chapter_btn_->setStyleSheet(export_style);
-    karte_btn_->setStyleSheet(export_style);
-    connect(chapter_btn_, &QPushButton::clicked, this, [this] { emit chapterRequested(); if (on_request_chapter) on_request_chapter(); });
-    connect(karte_btn_, &QPushButton::clicked, this, [this] { if (on_export_karte) on_export_karte(); });
-    exports->addWidget(chapter_btn_);
-    exports->addWidget(karte_btn_);
-    box->addLayout(exports);
-
-    deactivate_btn_ = new QPushButton(QStringLiteral("DEACTIVATE THIS PC"), unit05_box_);
-    deactivate_btn_->setStyleSheet(QStringLiteral("QPushButton{background:#3a2c2c;color:#c09090;border-radius:4px;padding:4px;}"));
-    connect(deactivate_btn_, &QPushButton::clicked, this, [this] { if (on_deactivate_pc) on_deactivate_pc(); });
-    box->addWidget(deactivate_btn_, 0, Qt::AlignRight);
-
-    into->addWidget(unit05_box_);
-}
-
-void StudioConsole::rebuild_chassis_pixmap() {
-    const qreal dpr = devicePixelRatioF();
-    const QSize sz = size();
-    const int panel_top = header_box_ ? header_box_->geometry().bottom() + 6 : 40;
-    if (dpr == chassis_dpr_ && sz == chassis_size_ && panel_top == chassis_panel_top_ && !chassis_.isNull()) return;
-    chassis_dpr_ = dpr; chassis_size_ = sz; chassis_panel_top_ = panel_top;
-    chassis_ = QPixmap(sz * dpr);
-    chassis_.setDevicePixelRatio(dpr);
-    chassis_.fill(Qt::transparent);
-
-    QPainter p(&chassis_);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    const QRectF r(0, 0, sz.width(), sz.height());
-
-    // Brushed-metal body.
-    QLinearGradient grad(r.topLeft(), r.bottomLeft());
-    grad.setColorAt(0.0, skin_.chassis_top);
-    grad.setColorAt(0.5, skin_.chassis_bottom.lighter(108));
-    grad.setColorAt(1.0, skin_.chassis_bottom);
-    p.fillRect(r, grad);
-
-    // Rack ears + screws.
-    const qreal ear_w = 22.0;
-    p.fillRect(QRectF(0, 0, ear_w, r.height()), skin_.ear);
-    p.fillRect(QRectF(r.width() - ear_w, 0, ear_w, r.height()), skin_.ear);
-    p.setPen(Qt::NoPen);
-    auto screw = [&](qreal x, qreal y) {
-        QRadialGradient g(QPointF(x, y), 5);
-        g.setColorAt(0.0, skin_.screw.lighter(140));
-        g.setColorAt(1.0, skin_.screw.darker(160));
-        p.setBrush(g);
-        p.drawEllipse(QPointF(x, y), 4.5, 4.5);
-        p.setPen(QPen(skin_.chassis_bottom.darker(130), 1));
-        p.drawLine(QPointF(x - 3, y), QPointF(x + 3, y));
-        p.setPen(Qt::NoPen);
+    // ---- Left: output + GR meters with scales -------------------------------
+    auto* left = new QVBoxLayout();
+    left->setSpacing(6);
+    left->addWidget(new SectionLabel(QStringLiteral("OUTPUT"), body));
+    auto* boxes = new QHBoxLayout();
+    pk_box_ = new ValueBox(body);
+    pk_box_->setFixedWidth(42);
+    gr_box_ = new ValueBox(body);
+    gr_box_->setFixedWidth(38);
+    boxes->addWidget(pk_box_);
+    boxes->addStretch(1);
+    boxes->addWidget(gr_box_);
+    left->addLayout(boxes);
+    left->addSpacing(2);
+    auto* meters = new QHBoxLayout();
+    meters->setSpacing(4);
+    auto col = [&](QWidget* w, int stretch_top, const QString& caption, int stretch_bottom) {
+        auto* v = new QVBoxLayout();
+        v->setSpacing(4);
+        v->addWidget(w, stretch_top);
+        auto* cap = new SectionLabel(caption, body);
+        cap->set_centered(true);
+        cap->setMinimumWidth(20);
+        v->addWidget(cap);
+        if (stretch_bottom > 0) v->addStretch(stretch_bottom);
+        return v;
     };
-    screw(ear_w / 2, 12); screw(ear_w / 2, r.height() - 12);
-    screw(r.width() - ear_w / 2, 12); screw(r.width() - ear_w / 2, r.height() - 12);
+    out_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Vertical, body);
+    out_meter_->setFixedWidth(22);
+    gr_meter_ = new LedMeter(LedMeter::Kind::GainReduction, Qt::Vertical, body);
+    gr_meter_->setFixedWidth(14);
+    meters->addLayout(col(out_meter_, 1, QStringLiteral("PK"), 0));
+    meters->addLayout(col(new MeterScale(MeterScale::Kind::Level, body), 1, QString(), 0));
+    meters->addLayout(col(gr_meter_, 42, QStringLiteral("GR"), 58));
+    meters->addLayout(col(new MeterScale(MeterScale::Kind::GainReduction, body), 42, QString(), 58));
+    left->addLayout(meters, 1);
+    connect(pk_box_, &ValueBox::clicked, this, [this] { engine_->telemetry().reset_holds(); out_meter_->reset_hold(); });
+    connect(out_meter_, &LedMeter::clicked, this, [this] { engine_->telemetry().reset_holds(); });
+    auto* left_w = new QWidget(body);
+    left_w->setLayout(left);
+    left_w->setFixedWidth(116);
+    h->addWidget(left_w);
 
-    // Inner recessed panel.
-    const QRectF panel = r.adjusted(ear_w + 4, panel_top, -(ear_w + 4), -6);
-    p.setBrush(skin_.panel);
-    p.setPen(QPen(skin_.chassis_bottom.darker(140), 1));
-    p.drawRoundedRect(panel, 6, 6);
+    // ---- Right: readouts + unit-specific controls + trim ------------------------
+    auto* right = new QVBoxLayout();
+    right->setSpacing(6);
+    auto* ro = new QHBoxLayout();
+    ro->setSpacing(8);
+    const QString fourth = mode == MODE_VOICE ? QStringLiteral("INPUT GAIN") : QStringLiteral("DUCK");
+    const QString labels[4] = {QStringLiteral("TRUE PEAK"), QStringLiteral("SHORT-TERM"), QStringLiteral("INTEGRATED"), fourth};
+    const QString units[4] = {QStringLiteral("dBTP"), QStringLiteral("LUFS"), QStringLiteral("LUFS"), QStringLiteral("dB")};
+    for (int i = 0; i < 4; ++i) {
+        readouts_[static_cast<std::size_t>(i)] = new Readout(labels[i], units[i], false, body);
+        ro->addWidget(readouts_[static_cast<std::size_t>(i)], 1);
+    }
+    right->addLayout(ro);
+    right->addSpacing(14);
+
+    auto section = [&](int idx, const QString& text) {
+        section_[static_cast<std::size_t>(idx)] = new SectionLabel(text, body);
+        right->addWidget(section_[static_cast<std::size_t>(idx)]);
+    };
+    auto key_row = [&](RackKey* a, RackKey* b, int height) {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(8);
+        a->setFixedHeight(height);
+        b->setFixedHeight(height);
+        row->addWidget(a, 1);
+        row->addWidget(b, 1);
+        right->addLayout(row);
+    };
+
+    switch (mode) {
+        case MODE_VOICE: {
+            section(0, QStringLiteral("CHARACTER"));
+            character_ = new SegmentedControl({QStringLiteral("SOFT / ASMR"), QStringLiteral("BROADCAST"), QStringLiteral("FPS / LOUD")}, body);
+            character_->setFixedHeight(30);
+            character_->set_current(prm.character.load());
+            connect(character_, &SegmentedControl::currentChanged, this, [this](int i) { engine_->params().character.store(i); changed(); });
+            right->addWidget(character_);
+            right->addSpacing(12);
+            section(1, QStringLiteral("SPACE FX"));
+            space_fx_ = new SegmentedControl({QStringLiteral("DRY"), QStringLiteral("KARAOKE"), QStringLiteral("BATH"),
+                                              QStringLiteral("HALL"), QStringLiteral("CAVE"), QStringLiteral("RADIO")}, body);
+            space_fx_->set_text_px(10);
+            space_fx_->setFixedHeight(30);
+            space_fx_->set_current(prm.space_fx.load());
+            connect(space_fx_, &SegmentedControl::currentChanged, this, [this](int i) { engine_->params().space_fx.store(i); changed(); });
+            right->addWidget(space_fx_);
+            right->addSpacing(12);
+            section(2, QStringLiteral("CALIBRATION / MONITOR"));
+            calib_key_ = new RackKey(QString(), body);
+            audition_key_ = new RackKey(QString(), body);
+            audition_key_->set_led(QStringLiteral("led_amber"));
+            audition_key_->setCheckable(true);
+            connect(calib_key_, &RackKey::clicked, this, &StudioConsole::run_calibration);
+            connect(audition_key_, &RackKey::clicked, this, &StudioConsole::toggle_audition);
+            key_row(calib_key_, audition_key_, 34);
+            right->addSpacing(12);
+            section(3, QStringLiteral("EMERGENCY"));
+            bleep_key_ = new RackKey(QString(), body);
+            bleep_key_->set_style(RackKey::Style::Danger);
+            bleep_key_->set_led(QStringLiteral("led_red"));
+            cough_key_ = new RackKey(QString(), body);
+            cough_key_->set_led(QStringLiteral("led_amber"));
+            connect(bleep_key_, &RackKey::pressed, this, [this] { engine_->bleep().trigger(3.0f); });
+            connect(bleep_key_, &RackKey::released, this, [this] { engine_->bleep().stop(); });
+            connect(cough_key_, &RackKey::pressed, this, [this] { engine_->cough().press(true); });
+            connect(cough_key_, &RackKey::released, this, [this] { engine_->cough().release(); });
+            key_row(bleep_key_, cough_key_, 40);
+            break;
+        }
+        case MODE_COLLAB:
+            section(0, QStringLiteral("TARGET LOUDNESS"));
+            right->addWidget(build_param_row(body, param_a_, param_a_box_, -24.0f, -8.0f, {-24, -20, -16, -12, -8},
+                                             prm.collab_target_lufs.load(), QStringLiteral("LUFS")));
+            param_a_unit_ = QStringLiteral("LUFS");
+            connect(param_a_, &RackFader::dbChanged, this, [this](float v) {
+                engine_->params().collab_target_lufs.store(v); param_a_box_->set_text(fmt_unit(v, param_a_unit_)); changed(); });
+            right->addSpacing(14);
+            section(1, QStringLiteral("DUCK WHEN I TALK"));
+            right->addWidget(build_param_row(body, param_b_, param_b_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
+                                             prm.collab_duck_db.load(), QStringLiteral("dB")));
+            connect(param_b_, &RackFader::dbChanged, this, [this](float v) {
+                engine_->params().collab_duck_db.store(v); param_b_box_->set_text(fmt_unit(v, QStringLiteral("dB"))); changed(); });
+            break;
+        case MODE_GAME:
+            section(0, QStringLiteral("IMPACT CEILING"));
+            right->addWidget(build_param_row(body, param_a_, param_a_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
+                                             prm.game_ceiling_db.load(), QStringLiteral("dB")));
+            param_a_unit_ = QStringLiteral("dB");
+            connect(param_a_, &RackFader::dbChanged, this, [this](float v) {
+                engine_->params().game_ceiling_db.store(v); param_a_box_->set_text(fmt_unit(v, param_a_unit_)); changed(); });
+            right->addSpacing(14);
+            section(1, QStringLiteral("VOICE SCOOP"));
+            right->addWidget(build_param_row(body, param_b_, param_b_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
+                                             prm.game_scoop_db.load(), QStringLiteral("dB")));
+            connect(param_b_, &RackFader::dbChanged, this, [this](float v) {
+                engine_->params().game_scoop_db.store(v); param_b_box_->set_text(fmt_unit(v, QStringLiteral("dB"))); changed(); });
+            break;
+        case MODE_BGM:
+            section(0, QStringLiteral("POCKET DEPTH"));
+            right->addWidget(build_param_row(body, param_a_, param_a_box_, -12.0f, 0.0f, {-12, -9, -6, -3, 0},
+                                             prm.bgm_pocket_db.load(), QStringLiteral("dB")));
+            param_a_unit_ = QStringLiteral("dB");
+            connect(param_a_, &RackFader::dbChanged, this, [this](float v) {
+                engine_->params().bgm_pocket_db.store(v); param_a_box_->set_text(fmt_unit(v, param_a_unit_)); changed(); });
+            right->addSpacing(14);
+            section(1, QStringLiteral("BGM MODE"));
+            safe_key_ = new RackKey(QString(), body);
+            safe_key_->set_led(QStringLiteral("led_amber"));
+            safe_key_->setCheckable(true);
+            safe_key_->setChecked(prm.bgm_safe_mode.load() != 0);
+            swell_key_ = new RackKey(QString(), body);
+            swell_key_->set_led(QStringLiteral("led_green"));
+            swell_key_->setCheckable(true);
+            swell_key_->setChecked(prm.bgm_auto_swell.load() != 0);
+            connect(safe_key_, &RackKey::toggled, this, [this](bool on) { engine_->params().bgm_safe_mode.store(on ? 1 : 0); changed(); });
+            connect(swell_key_, &RackKey::toggled, this, [this](bool on) { engine_->params().bgm_auto_swell.store(on ? 1 : 0); changed(); });
+            key_row(safe_key_, swell_key_, 34);
+            break;
+        default:
+            break;
+    }
+    right->addStretch(1);
+    section(5, QStringLiteral("OUTPUT TRIM"));
+    right->addWidget(build_trim_row(body));
+    h->addLayout(right, 1);
+    return body;
 }
 
-void StudioConsole::paintEvent(QPaintEvent*) {
-    rebuild_chassis_pixmap();
-    QPainter p(this);
-    p.drawPixmap(0, 0, chassis_);
+QWidget* StudioConsole::build_director_body() {
+    auto& prm = engine_->params();
+    auto* body = new QWidget(this);
+    auto* h = new QHBoxLayout(body);
+    h->setContentsMargins(16, 14, 16, 12);
+    h->setSpacing(10);
+    const Mode modes[4] = {MODE_VOICE, MODE_COLLAB, MODE_GAME, MODE_BGM};
+    const char* names[4] = {"VOCAL", "COLLAB", "GAME", "BGM"};
+    for (int i = 0; i < 4; ++i) {
+        auto* s = new ChannelStrip(modes[i], QStringLiteral("0%1").arg(i + 1), QString::fromLatin1(names[i]), body);
+        strips_[static_cast<std::size_t>(i)] = s;
+        connect(s, &ChannelStrip::trimMoved, this, [this](Mode m, float db) { if (bus_) bus_->push_trim(m, db); });
+        h->addWidget(s);
+    }
+    h->addSpacing(6);
+
+    auto* master = new PanelBox(body);
+    auto* v = new QVBoxLayout(master);
+    v->setContentsMargins(16, 16, 16, 14);
+    v->setSpacing(6);
+    master_label_ = new SectionLabel(QStringLiteral("VIRTUAL MASTER SUM  ·  LUFS"), master);
+    v->addWidget(master_label_);
+    auto* ro = new QHBoxLayout();
+    ro->setSpacing(8);
+    const QString ml[3] = {QStringLiteral("MOMENTARY"), QStringLiteral("SHORT-TERM"), QStringLiteral("INTEGRATED")};
+    for (int i = 0; i < 3; ++i) {
+        master_[static_cast<std::size_t>(i)] = new Readout(ml[i], QString(), true, master);
+        ro->addWidget(master_[static_cast<std::size_t>(i)], 1);
+    }
+    v->addLayout(ro);
+    v->addSpacing(14);
+    target_label_ = new SectionLabel(QStringLiteral("YOUTUBE TARGET  -12 \u00B11.5"), master);
+    v->addWidget(target_label_);
+    target_ = new TargetBar(master);
+    v->addWidget(target_);
+    v->addSpacing(6);
+    phase_label_ = new SectionLabel(QStringLiteral("PHASE CORRELATION"), master);
+    v->addWidget(phase_label_);
+    corr_ = new CorrelationBar(master);
+    v->addWidget(corr_);
+    v->addSpacing(6);
+    auto* keys = new QHBoxLayout();
+    keys->setSpacing(8);
+    mono_key_ = new RackKey(QString(), master);
+    mono_key_->set_led(QStringLiteral("led_amber"));
+    mono_key_->setCheckable(true);
+    mono_key_->setChecked(prm.mono_check.load() != 0);
+    mono_key_->setFixedHeight(32);
+    meter_reset_key_ = new RackKey(QString(), master);
+    meter_reset_key_->setFixedHeight(32);
+    keys->addWidget(mono_key_, 1);
+    keys->addWidget(meter_reset_key_, 1);
+    v->addLayout(keys);
+    connect(mono_key_, &RackKey::toggled, this, [this](bool on) { engine_->params().mono_check.store(on ? 1 : 0); });
+    connect(meter_reset_key_, &RackKey::clicked, this, [this] { engine_->reset_meters(); });
+    v->addSpacing(12);
+    scene_label_ = new SectionLabel(QStringLiteral("SCENE"), master);
+    v->addWidget(scene_label_);
+    scene_ = new SegmentedControl({}, master);
+    scene_->setFixedHeight(32);
+    v->addWidget(scene_);
+    v->addSpacing(8);
+    auto* exports = new QHBoxLayout();
+    exports->setSpacing(8);
+    chapter_key_ = new RackKey(QString(), master);
+    karte_key_ = new RackKey(QString(), master);
+    chapter_key_->setFixedHeight(32);
+    karte_key_->setFixedHeight(32);
+    exports->addWidget(chapter_key_, 1);
+    exports->addWidget(karte_key_, 1);
+    v->addLayout(exports);
+    v->addStretch(1);
+    connect(scene_, &SegmentedControl::currentChanged, this, [this](int i) {
+        engine_->params().apply_scene(i);
+        if (on_scene_macro) on_scene_macro(i);
+        changed();
+    });
+    connect(chapter_key_, &RackKey::clicked, this, [this] { emit chapterRequested(); if (on_request_chapter) on_request_chapter(); });
+    connect(karte_key_, &RackKey::clicked, this, [this] { if (on_export_karte) on_export_karte(); });
+    h->addWidget(master, 1);
+    return body;
+}
+
+QWidget* StudioConsole::build_mini_bar() {
+    auto* bar = new QWidget(this);
+    auto* h = new QHBoxLayout(bar);
+    h->setContentsMargins(16, 13, 16, 8);
+    h->setSpacing(30);
+    mini_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Horizontal, bar);
+    mini_meter_->set_scale_visible(true);
+    mini_meter_->setFixedHeight(32);
+    h->addWidget(mini_meter_, 1, Qt::AlignTop);
+    auto* values = new MiniValues(bar);
+    mini_values_ = values;
+    h->addWidget(values, 0, Qt::AlignTop);
+    bar->setFixedHeight(75);
+    return bar;
+}
+
+void StudioConsole::relabel() {
+    const bool ja = lang_ == UiLang::JA;
+    header_->lang()->blockSignals(true);
+    header_->lang()->set_current(ja ? 0 : 1);
+    header_->lang()->blockSignals(false);
+    auto set = [](RackKey* k, const QString& en, const QString& j, bool jap) { if (k) k->setText(jap ? j : en); };
+    set(calib_key_, QStringLiteral("10 s Auto Calibrate"), QStringLiteral("10秒 自動測定"), ja);
+    set(audition_key_, QStringLiteral("A/B Audition"), QStringLiteral("A/B 試聴"), ja);
+    set(bleep_key_, QStringLiteral("Bleep  1 kHz"), QStringLiteral("ピー音  1 kHz"), ja);
+    set(cough_key_, QStringLiteral("Cough Mute"), QStringLiteral("咳ミュート"), ja);
+    set(safe_key_, QStringLiteral("Singing / Rec Safe"), QStringLiteral("歌枠・収録セーフ"), ja);
+    set(swell_key_, QStringLiteral("AFK Swell"), QStringLiteral("離席時スウェル"), ja);
+    set(mono_key_, QStringLiteral("Mono Check"), QStringLiteral("モノラル確認"), ja);
+    set(meter_reset_key_, QStringLiteral("Reset Meters"), QStringLiteral("メーターリセット"), ja);
+    set(chapter_key_, QStringLiteral("Chapter Mark"), QStringLiteral("チャプター記録"), ja);
+    set(karte_key_, QStringLiteral("Export Report"), QStringLiteral("配信カルテ出力"), ja);
+    if (scene_) {
+        const int cur = engine_->params().scene.load();
+        scene_->blockSignals(true);
+        scene_->set_options(ja ? QStringList{QStringLiteral("FPS・ゲーム"), QStringLiteral("雑談"), QStringLiteral("歌枠"), QStringLiteral("ASMR")}
+                               : QStringList{QStringLiteral("FPS / GAME"), QStringLiteral("TALK"), QStringLiteral("SINGING"), QStringLiteral("ASMR")});
+        scene_->set_current(cur);
+        scene_->blockSignals(false);
+    }
+    if (status_ && director_) status_->set_link_text(ja ? QStringLiteral("ライセンス") : QStringLiteral("License"));
+    update_status();
+    update();
+}
+
+void StudioConsole::set_language(UiLang lang) {
+    lang_ = lang;
+    relabel();
+}
+
+void StudioConsole::set_update_available(const QString& version) {
+    update_version_ = version;
+    header_->set_update(version);
+}
+
+void StudioConsole::update_status() {
+    if (!status_) return;
+    const bool ja = lang_ == UiLang::JA;
+    const auto& t = engine_->telemetry();
+    const float fs = t.sample_rate.load();
+    const double lat = fs > 0 ? engine_->latency_samples() * 1000.0 / fs : 0.0;
+    const bool guard = bus_ && bus_->raw() && bus_->raw()->guard_active.load() != 0;
+    status_->set_right(QStringLiteral("%1 kHz  ·  %2 ch  ·  v1.0.0")
+                           .arg(QString::number(fs / 1000.0f, 'g', 3)).arg(t.channels.load()));
+    if (t.hint_bgm_misplug.load()) {
+        status_->set_message(StatusLine::Level::Warn, ja ? QStringLiteral("音楽を検出：BGM は 04 BGM POCKET へ")
+                                                          : QStringLiteral("Music detected: use 04 BGM POCKET"));
+    } else if (t.bridge_mode.load()) {
+        status_->set_message(StatusLine::Level::Info, ja ? QStringLiteral("VC Edition と連携中（二重処理を停止）")
+                                                          : QStringLiteral("Linked to VC Edition (no double processing)"));
+    } else if (t.acapella_pad.load()) {
+        status_->set_message(StatusLine::Level::Ok, ja ? QStringLiteral("雑談ソロ：天井を -1.5 dB 下げています")
+                                                        : QStringLiteral("Solo talk: ceiling lowered 1.5 dB"));
+    } else {
+        const QString g = guard ? (ja ? QStringLiteral("作動中") : QStringLiteral("active"))
+                                : (ja ? QStringLiteral("待機") : QStringLiteral("standby"));
+        if (director_) {
+            int live = 0;
+            if (bus_ && bus_->raw()) {
+                const std::int64_t now = now_us();
+                for (std::size_t i = 0; i < kMaxSlots; ++i) {
+                    const auto& s = bus_->raw()->unit_slots[i];
+                    if (s.in_use.load() && now - s.heartbeat_us.load() <= SharedBus::kHeartbeatGcUs) ++live;
+                }
+            }
+            status_->set_message(StatusLine::Level::Ok,
+                ja ? QStringLiteral("%1 ユニット リンク中  ·  Summing Guard %2  ·  先読み %3 ms").arg(live).arg(g).arg(lat, 0, 'f', 1)
+                   : QStringLiteral("%1 units linked  ·  Summing Guard %2  ·  Look-ahead %3 ms").arg(live).arg(g).arg(lat, 0, 'f', 1));
+        } else {
+            status_->set_message(StatusLine::Level::Ok,
+                ja ? QStringLiteral("動作中  ·  先読み %1 ms  ·  Summing Guard %2").arg(lat, 0, 'f', 1).arg(g)
+                   : QStringLiteral("Running  ·  Look-ahead %1 ms  ·  Summing Guard %2").arg(lat, 0, 'f', 1).arg(g));
+        }
+    }
 }
 
 void StudioConsole::refresh() {
-    auto& t = engine_->telemetry();
-    if (mini_ && mini_meter_) {
-        mini_meter_->set_values(t.true_peak_db.load(), t.rms_db.load(), t.peak_hold_db.load());
-        mini_meter_->update();
-        const QString unit = director_ ? QStringLiteral("MASTER") : QStringLiteral("[01]");
-        mini_readout_->setText(QStringLiteral("%1  %2 dBTP   S %3 LUFS   GR %4 dB")
-            .arg(unit, fmt_db(t.true_peak_db.load()), fmt_db(t.lufs_s.load()), fmt_db(t.gr_db.load())));
-    }
-    // UNIT 01 meters.
-    if (mic_level_) {
-        mic_level_->set_values(t.true_peak_db.load(), t.rms_db.load(), t.peak_hold_db.load());
-        mic_level_->update();
-    }
-    if (mic_gr_) { mic_gr_->set_gr(t.gr_db.load()); mic_gr_->update(); }
-    if (mic_readout_) {
-        mic_readout_->setText(QStringLiteral("%1 dBTP  %2 LUFS").arg(fmt_db(t.true_peak_db.load()), fmt_db(t.lufs_s.load())));
-    }
-    if (mic_hint_) {
-        QString hint;
-        if (t.hint_bgm_misplug.load()) hint = (lang_ == UiLang::JA)
-            ? QStringLiteral("\U0001F4A1 このトラックはBGMではありませんか？ [04] BGM POCKET をお使いください。")
-            : QStringLiteral("\U0001F4A1 Is this actually BGM? Use [04] BGM POCKET for music.");
-        else if (t.bridge_mode.load()) hint = (lang_ == UiLang::JA)
-            ? QStringLiteral("\U0001F517 Link Bridge Mode: 単体VCアプリと連携中（二重処理を自動回避）。")
-            : QStringLiteral("\U0001F517 Link Bridge Mode: linked to standalone VC app (double-processing bypassed).");
-        else if (t.acapella_pad.load()) hint = (lang_ == UiLang::JA)
-            ? QStringLiteral("\U0001F3A7 雑談ソロ検出：天井を自動で -1.5 dB 落ち着かせています。")
-            : QStringLiteral("\U0001F3A7 Solo chat detected: ceiling auto-eased by -1.5 dB.");
-        mic_hint_->setText(hint);
-    }
-
-    // LINK MATRIX lamp from the bus.
-    if (link_matrix_ && bus_ && bus_->raw()) {
-        const auto* b = bus_->raw();
-        const std::int64_t now = now_us();
+    const auto& t = engine_->telemetry();
+    // LINK lamps.
+    if (bus_ && bus_->raw()) {
         bool live[5] = {false, false, false, false, false};
+        const std::int64_t now = now_us();
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
-            const auto& s = b->unit_slots[i];
-            if (s.in_use.load() == 0) continue;
-            if (now - s.heartbeat_us.load() > SharedBus::kHeartbeatGcUs) continue;
+            const auto& s = bus_->raw()->unit_slots[i];
+            if (!s.in_use.load() || now - s.heartbeat_us.load() > SharedBus::kHeartbeatGcUs) continue;
             const int m = s.mode.load();
             if (m >= 0 && m < 5) live[m] = true;
         }
-        const char* tags[5] = {"01", "02", "03", "04", "DIR"};
-        QString s = QStringLiteral("<span style='color:#7a7d82'>LINK</span>&nbsp;");
-        for (int i = 0; i < 5; ++i) {
-            s += live[i] ? QStringLiteral("<span style='color:%1'>\u25CF%2</span>&nbsp;").arg(skin_.led_green.name(), QString::fromLatin1(tags[i]))
-                         : QStringLiteral("<span style='color:#4a4d52'>\u25CB%1</span>&nbsp;").arg(QString::fromLatin1(tags[i]));
-        }
-        link_matrix_->setText(s);
+        header_->set_links(live);
     }
-
-    // UNIT 05 strips pull their peers' telemetry from the bus.
+    const float tp = t.true_peak_db.load(), hold = t.peak_hold_db.load();
+    if (out_meter_) {
+        out_meter_->set_level(tp, t.rms_db.load(), hold);
+        gr_meter_->set_gr(t.gr_db.load());
+        pk_box_->set_text(fmt_db(hold), hold > -1.0f ? Tok::red : QColor());
+        gr_box_->set_text(fmt_db(t.gr_db.load()));
+        readouts_[0]->set_value(fmt_db(tp), tp > -1.0f ? Tok::red : QColor());
+        readouts_[1]->set_value(fmt_db(t.lufs_s.load()));
+        readouts_[2]->set_value(fmt_db(t.lufs_i.load()));
+        readouts_[3]->set_value(engine_->mode() == MODE_VOICE ? fmt_signed(engine_->params().input_gain_db.load())
+                                                             : fmt_db(t.duck_db.load()));
+        if (audition_key_) audition_key_->setChecked(engine_->audition().playing() || engine_->audition().capturing());
+        if (cough_key_) cough_key_->set_lit(engine_->cough().active());
+        if (bleep_key_) bleep_key_->set_lit(engine_->bleep().active());
+    }
     if (director_ && bus_ && bus_->raw()) {
-        const auto* b = bus_->raw();
         const std::int64_t now = now_us();
         const Mode modes[4] = {MODE_VOICE, MODE_COLLAB, MODE_GAME, MODE_BGM};
         for (int k = 0; k < 4; ++k) {
-            float tp = -120, rms = -120, lufs = -120, gr = 0, duck = 0; bool live = false;
+            float stp = -120, rms = -120, lufs = -120, gr = 0, duck = 0;
+            bool live = false;
             for (std::size_t i = 0; i < kMaxSlots; ++i) {
-                const auto& s = b->unit_slots[i];
-                if (s.in_use.load() == 0 || s.mode.load() != modes[k]) continue;
+                const auto& s = bus_->raw()->unit_slots[i];
+                if (!s.in_use.load() || s.mode.load() != modes[k]) continue;
                 if (now - s.heartbeat_us.load() > SharedBus::kHeartbeatGcUs) continue;
-                tp = s.true_peak_db.load(); rms = s.rms_db.load(); lufs = s.short_term_lufs.load();
-                gr = s.gr_db.load(); duck = s.duck_db.load(); live = true; break;
+                stp = s.true_peak_db.load(); rms = s.rms_db.load(); lufs = s.short_term_lufs.load();
+                gr = s.gr_db.load(); duck = s.duck_db.load(); live = true;
+                break;
             }
-            strips_[static_cast<std::size_t>(k)]->update_from(tp, tp, rms, lufs, gr, duck, live);
+            strips_[static_cast<std::size_t>(k)]->update_from(stp, rms, lufs, gr, duck, live);
         }
-        // Master section uses UNIT 05's own loudness meter (it sees Track-1 sum).
-        master_lufs_->setText(QStringLiteral("M %1  S %2\nI %3 LUFS")
-            .arg(fmt_db(t.lufs_m.load()), fmt_db(t.lufs_s.load()), fmt_db(t.lufs_i.load())));
-        const float li = t.lufs_i.load();
-        if (in_youtube_golden_zone(li)) {
-            golden_zone_->setText(QStringLiteral("✓ YOUTUBE LIVE GOLDEN ZONE"));
-            golden_zone_->setStyleSheet(QStringLiteral("color:%1;font-weight:bold;").arg(skin_.led_green.name()));
-        } else {
-            golden_zone_->setText(li <= -119.0f ? QStringLiteral("—") : QStringLiteral("%1 LUFS").arg(fmt_db(li)));
-            golden_zone_->setStyleSheet(QStringLiteral("color:#9a9da2;"));
-        }
+        const float m = t.lufs_m.load(), s = t.lufs_s.load(), i = t.lufs_i.load();
+        master_[0]->set_value(fmt_db(m));
+        master_[1]->set_value(fmt_db(s));
+        master_[2]->set_value(fmt_db(i));
+        target_->set_value(i);
+        if (i <= -119.0f) target_label_->set_right(QStringLiteral("--"), Tok::t3);
+        else if (in_youtube_golden_zone(i)) target_label_->set_right(QStringLiteral("IN RANGE"), Tok::ok, true);
+        else if (i > -10.5f) target_label_->set_right(QStringLiteral("TOO LOUD"), Tok::warn, true);
+        else target_label_->set_right(QStringLiteral("TOO QUIET"), Tok::warn, true);
         const float pc = t.phase_corr.load();
-        phase_corr_->setText(QStringLiteral("Phase %1%2").arg(pc >= 0 ? QStringLiteral("+") : QString()).arg(QString::number(static_cast<double>(pc), 'f', 2)));
-        phase_corr_->setStyleSheet(pc < 0.0f ? QStringLiteral("color:%1;font-family:monospace;").arg(skin_.led_red.name())
-                                             : QStringLiteral("color:#d6d8dc;font-family:monospace;"));
+        phase_label_->set_right(fmt_signed(pc, 2), pc < 0 ? Tok::red : Tok::t1);
+        corr_->set_value(pc);
+        mono_key_->setChecked(engine_->params().mono_check.load() != 0);
+    }
+    if (mini_) {
+        mini_meter_->set_level(tp, t.rms_db.load(), hold);
+        auto* mv = static_cast<MiniValues*>(mini_values_);
+        if (director_) mv->set({{QStringLiteral("M"), fmt_db(t.lufs_m.load())}, {QStringLiteral("S"), fmt_db(t.lufs_s.load())},
+                                {QStringLiteral("I"), fmt_db(t.lufs_i.load())}, {QStringLiteral("TP"), fmt_db(tp)}});
+        else mv->set({{QStringLiteral("TP"), fmt_db(tp)}, {QStringLiteral("S"), fmt_db(t.lufs_s.load())},
+                      {QStringLiteral("GR"), fmt_db(t.gr_db.load())}});
+    }
+    update_status();
+}
+
+void StudioConsole::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p.fillRect(rect(), Tok::chassis);
+    p.fillRect(QRect(kEar, 0, width() - 2 * kEar, height()), Tok::faceplate);
+    p.setPen(QPen(QColor(0x24, 0x28, 0x2D), 1));
+    p.drawLine(QPointF(kEar, 0.5), QPointF(width() - kEar, 0.5));
+    const QPixmap& screw = part(QStringLiteral("screw"));
+    auto draw_screw = [&](qreal cx, qreal cy) { p.drawPixmap(QRectF(cx - 6, cy - 6, 12, 12), screw, QRectF(screw.rect())); };
+    for (qreal cx : {kEar / 2.0, width() - kEar / 2.0}) {
+        if (height() > 200) { draw_screw(cx, 26); draw_screw(cx, height() - 26); }
+        else draw_screw(cx, height() / 2.0);
     }
 }
 
 void StudioConsole::showEvent(QShowEvent* e) {
     QDialog::showEvent(e);
     clamp_to_screen();
-    if (timer_) timer_->start(); // Resume 30 fps only while visible.
+    refresh();
+    timer_->start();
 }
+
 void StudioConsole::hideEvent(QHideEvent* e) {
-    if (timer_) timer_->stop();  // 0.00% CPU when hidden.
+    timer_->stop();   // 0.00 % CPU while hidden.
     QDialog::hideEvent(e);
 }
 
@@ -781,105 +1110,73 @@ void StudioConsole::clamp_to_screen() {
     move(g.topLeft());
 }
 
-void StudioConsole::toggle_pin() {
-    pinned_ = pin_btn_->isChecked();
+void StudioConsole::toggle_pin(bool on) {
     Qt::WindowFlags f = windowFlags();
-    f.setFlag(Qt::WindowStaysOnTopHint, pinned_);
+    f.setFlag(Qt::WindowStaysOnTopHint, on);
     setWindowFlags(f);
-    show(); // Re-apply flags.
+    show();   // Re-applying flags hides the window.
 }
 
-void StudioConsole::toggle_mini() {
-    // MINI folds the console into a ~120 px strip: header + one horizontal
-    // meter + a one-line readout. The full body is hidden, not destroyed.
-    mini_ = mini_btn_->isChecked();
-    body_box_->setVisible(!mini_);
-    mini_bar_->setVisible(mini_);
-    if (mini_) {
-        setMinimumHeight(0);
-        setMaximumHeight(130);
-        resize(width(), minimumSizeHint().height());
+void StudioConsole::toggle_mini(bool on) {
+    mini_ = on;
+    header_->set_compact(on);
+    body_->setVisible(!on);
+    status_->setVisible(!on);
+    mini_bar_->setVisible(on);
+    if (on) {
+        setMinimumHeight(120);
+        setMaximumHeight(120);
+        resize(width(), 120);
     } else {
+        setMinimumHeight(120);
         setMaximumHeight(560);
         resize(width(), 560);
     }
     refresh();
 }
 
-void StudioConsole::toggle_language() {
-    lang_ = (lang_ == UiLang::JA) ? UiLang::EN : UiLang::JA;
-    relabel();
-}
-
-void StudioConsole::set_language(UiLang lang) { lang_ = lang; relabel(); }
-
-void StudioConsole::relabel() {
-    for (int i = 0; i < 4; ++i) if (strips_[static_cast<std::size_t>(i)]) strips_[static_cast<std::size_t>(i)]->set_language(lang_);
-    if (calib_btn_) calib_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F3A4 10秒カンペ測定") : QStringLiteral("\U0001F3A4 10s CALIBRATE"));
-    if (audition_btn_) audition_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F501 加工前/後 試聴") : QStringLiteral("\U0001F501 A/B AUDITION"));
-    if (bleep_btn_) bleep_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F92C ピー音") : QStringLiteral("\U0001F92C 1kHz BLEEP"));
-    if (cough_btn_) cough_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F927 咳ミュート") : QStringLiteral("\U0001F927 COUGH MUTE"));
-    if (chapter_btn_) chapter_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F4D1 チャプター記録") : QStringLiteral("\U0001F4D1 CHAPTER MARK"));
-    if (karte_btn_) karte_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("\U0001F4CA カルテ出力") : QStringLiteral("\U0001F4CA EXPORT KARTE"));
-    if (deactivate_btn_) deactivate_btn_->setText(lang_ == UiLang::JA ? QStringLiteral("このPCの認証を解除") : QStringLiteral("DEACTIVATE THIS PC"));
-    const bool ja = (lang_ == UiLang::JA);
-    if (char_lbl_) char_lbl_->setText(ja ? QStringLiteral("キャラクター") : QStringLiteral("Character"));
-    if (fx_lbl_) fx_lbl_->setText(ja ? QStringLiteral("空間エフェクト") : QStringLiteral("Space FX"));
-    if (trim_lbl_) trim_lbl_->setText(ja ? QStringLiteral("出力トリム") : QStringLiteral("OUTPUT TRIM"));
-    if (unit05_title_) unit05_title_->setText(ja ? QStringLiteral("[05] 統合ミキサー＆声ディレクター")
-                                                 : QStringLiteral("[05] STREAM DIRECTOR  \u2014  MASTER TELEMETRY"));
-    if (master_title_) master_title_->setText(ja ? QStringLiteral("仮想マスター合算") : QStringLiteral("VIRTUAL MASTER SUM"));
-    if (mono_check_) mono_check_->setText(ja ? QStringLiteral("モノラル確認") : QStringLiteral("Mono Check"));
-    static const char* scene_en[4] = {"FPS/GAME", "TALK", "SINGING", "ASMR"};
-    const QString scene_ja[4] = {QStringLiteral("FPS/ゲーム"), QStringLiteral("雑談"), QStringLiteral("歌枠"), QStringLiteral("ASMR")};
-    for (int i = 0; i < 4; ++i)
-        if (scene_btns_[i]) scene_btns_[i]->setText(ja ? scene_ja[i] : QString::fromLatin1(scene_en[i]));
-    for (auto& hook : relabel_hooks_) hook();
-    update();
-}
-
 void StudioConsole::panic_reset() {
-    engine_->params().factory_reset_keep_calibration();
-    if (character_) character_->setCurrentIndex(engine_->params().character.load());
-    if (space_fx_) space_fx_->setCurrentIndex(engine_->params().space_fx.load());
-    if (mic_trim_) mic_trim_->set_db(engine_->params().output_trim_db.load());
-    if (mono_check_) mono_check_->setChecked(false);
+    auto& prm = engine_->params();
+    prm.factory_reset_keep_calibration();
+    if (character_) character_->set_current(prm.character.load());
+    if (space_fx_) space_fx_->set_current(prm.space_fx.load());
+    if (trim_) trim_->set_db(prm.output_trim_db.load());
+    if (param_a_) {
+        switch (engine_->mode()) {
+            case MODE_COLLAB: param_a_->set_db(prm.collab_target_lufs.load()); param_b_->set_db(prm.collab_duck_db.load()); break;
+            case MODE_GAME: param_a_->set_db(prm.game_ceiling_db.load()); param_b_->set_db(prm.game_scoop_db.load()); break;
+            case MODE_BGM: param_a_->set_db(prm.bgm_pocket_db.load()); break;
+            default: break;
+        }
+    }
+    if (safe_key_) safe_key_->setChecked(prm.bgm_safe_mode.load() != 0);
+    if (swell_key_) swell_key_->setChecked(prm.bgm_auto_swell.load() != 0);
+    if (mono_key_) mono_key_->setChecked(false);
+    if (scene_) { scene_->blockSignals(true); scene_->set_current(prm.scene.load()); scene_->blockSignals(false); }
     engine_->telemetry().reset_holds();
     engine_->reset_meters();
-    if (on_params_changed) on_params_changed();
+    changed();
 }
 
 void StudioConsole::run_calibration() {
     if (engine_->calibrator().running()) return;
-    CalibrationDialog dlg(engine_, &skin_, lang_, this);
-    dlg.exec();
-    if (on_params_changed) on_params_changed(); // Persist a committed input gain.
-}
-
-void StudioConsole::start_audition() {
-    auto& a = engine_->audition();
-    if (a.playing() || a.capturing()) { a.stop(); audition_btn_->setChecked(false); return; }
-    a.start_record(engine_->telemetry().sample_rate.load());
-    // After 3 s the recorder flips to IDLE; a short timer then starts the loop.
-    QTimer::singleShot(static_cast<int>(dsp::AuditionRecorder::kSeconds * 1000 + 100), this, [this] {
-        engine_->audition().start_loop();
-    });
-}
-
-void StudioConsole::fire_bleep() { engine_->bleep().trigger(3.0f); }
-// UNIT 01 publishes the cough state on the bus; UNIT 04 lifts BGM +2 dB itself.
-void StudioConsole::hold_cough() { engine_->cough().press(true); }
-
-void StudioConsole::set_update_available(const QString& version) {
-    update_available_ = true;
-    update_version_ = version;
-    if (update_btn_) {
-        update_btn_->setVisible(true);
-        update_btn_->setText(QStringLiteral("⚡ UPDATE v%1 READY").arg(version));
-        update_btn_->setStyleSheet(QStringLiteral(
-            "QPushButton{background:%1;color:#1a1a1a;border-radius:4px;padding:3px 8px;font-weight:bold;}")
-            .arg(skin_.accent.name()));
+    if (std::abs(engine_->params().input_gain_db.load()) > 0.05f) {
+        const auto answer = QMessageBox::question(this, QStringLiteral("MODEL 600"),
+            lang_ == UiLang::JA ? QStringLiteral("測定済みの入力ゲイン（%1 dB）を上書きしますか？").arg(fmt_signed(engine_->params().input_gain_db.load()))
+                                : QStringLiteral("Overwrite the calibrated input gain (%1 dB)?").arg(fmt_signed(engine_->params().input_gain_db.load())));
+        if (answer != QMessageBox::Yes) return;
     }
+    CalibrationDialog dlg(engine_, lang_, this);
+    dlg.exec();
+    changed();   // Persist a committed input gain.
+}
+
+void StudioConsole::toggle_audition() {
+    auto& a = engine_->audition();
+    if (a.playing() || a.capturing()) { a.stop(); return; }
+    a.start_record(engine_->telemetry().sample_rate.load());
+    // The recorder flips to IDLE after 3 s; then loop DRY / processed.
+    QTimer::singleShot(dsp::AuditionRecorder::kSeconds * 1000 + 100, this, [this] { engine_->audition().start_loop(); });
 }
 
 } // namespace sw::model600::ui

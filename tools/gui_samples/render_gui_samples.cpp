@@ -11,18 +11,17 @@
 #include "custom-ui-dialog.hpp"
 #include "dsp-core.hpp"
 #include "shared-state.hpp"
+#include "ui-theme.hpp"
+#include "ui-widgets.hpp"
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
-#include <QFont>
-#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
 #include <QPixmap>
-#include <QProgressBar>
 #include <QPushButton>
 #include <QSlider>
 #include <QThread>
@@ -30,6 +29,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <random>
 #include <vector>
 
@@ -41,13 +41,10 @@ namespace {
 
 QString g_out;
 int g_count = 0;
+constexpr int kExpected = 15;
 
-void pump(int ms = 60) {
-    // Let layouts settle, timers fire and the chassis pixmap regenerate.
-    for (int i = 0; i < ms / 10; ++i) {
-        QApplication::processEvents();
-        QThread::msleep(10);
-    }
+void pump(int ms = 80) {
+    for (int i = 0; i < ms / 10; ++i) { QApplication::processEvents(); QThread::msleep(10); }
     QApplication::processEvents();
 }
 
@@ -55,21 +52,15 @@ void save(QWidget* w, const QString& name) {
     pump();
     const QPixmap px = w->grab();
     const QString path = QDir(g_out).filePath(name);
-    if (px.save(path)) {
-        ++g_count;
-        std::printf("  wrote %s (%dx%d)\n", path.toUtf8().constData(), px.width(), px.height());
-    } else {
-        std::printf("  FAILED %s\n", path.toUtf8().constData());
-    }
+    if (px.save(path)) { ++g_count; std::printf("  wrote %s (%dx%d)\n", path.toUtf8().constData(), px.width(), px.height()); }
+    else std::printf("  FAILED %s\n", path.toUtf8().constData());
 }
 
-// ---- Test signals -----------------------------------------------------------
 struct Gen {
     std::mt19937 rng{7};
     std::normal_distribution<float> nd{0.0f, 1.0f};
     float ph = 0.0f;
-    // Vowel-like voice: 160 Hz harmonics weighted into the formant band.
-    float voice(float amp) {
+    float voice(float amp) {   // Vowel-like: 160 Hz harmonics weighted into the formant band.
         float s = 0.0f;
         for (int h = 1; h <= 16; ++h) {
             const float w = (h >= 3 && h <= 12) ? 2.5f : 1.0f;
@@ -82,7 +73,6 @@ struct Gen {
     float noise(float amp) { return nd(rng) * amp; }
 };
 
-// Run `seconds` of audio through an engine. fn(i, L, R) fills one frame.
 template <typename Fn>
 void run(Engine& e, int nch, float seconds, Fn fn) {
     const int N = 480;
@@ -101,13 +91,22 @@ void run(Engine& e, int nch, float seconds, Fn fn) {
     }
 }
 
-QPushButton* find_button(QWidget* root, const QString& contains) {
-    for (QPushButton* b : root->findChildren<QPushButton*>())
-        if (b->text().contains(contains)) return b;
-    return nullptr;
+template <typename T>
+T* child(QWidget* root, const char* name) { return root->findChild<T*>(QString::fromLatin1(name)); }
+
+void console_shot(Engine& e, SharedBus& bus, bool director, UiLang lang, const QString& name,
+                  int w, const std::function<void(StudioConsole&)>& prep = {}) {
+    StudioConsole con(&e, &bus, director, true);
+    con.resize(w, 560);
+    con.set_language(lang);
+    con.show();
+    if (prep) prep(con);
+    QMetaObject::invokeMethod(&con, "refresh");
+    save(&con, name);
+    con.hide();
 }
 
-// ---- Approximation of OBS's own filter dialog (rendered by OBS, not us) ----
+// OBS draws its own filter dialog; this is an approximation for documentation.
 QWidget* make_obs_filter_panel() {
     auto* w = new QWidget();
     w->setFixedSize(980, 600);
@@ -129,20 +128,19 @@ QWidget* make_obs_filter_panel() {
     auto* body = new QHBoxLayout();
     auto* list = new QListWidget();
     list->setFixedWidth(330);
-    list->addItem(QStringLiteral("MODEL 600 - [01] マイク・声用 (VOCAL MASTER)"));
-    list->addItem(QStringLiteral("MODEL 600 - [02] コラボ・通話用 (COLLAB RIDER)"));
-    list->addItem(QStringLiteral("MODEL 600 - [03] ゲーム音用 (GAME IMPACT)"));
-    list->addItem(QStringLiteral("MODEL 600 - [04] BGM・音楽用 (BGM POCKET)"));
-    list->addItem(QStringLiteral("MODEL 600 - [05] 統合ミキサー＆声ディレクター (STREAM DIRECTOR)"));
-    list->setCurrentRow(0);
     list->setWordWrap(true);
+    const QStringList names = {
+        QStringLiteral("[01] マイク・声用 (VOCAL MASTER)"),
+        QStringLiteral("[02] コラボ・通話用 (COLLAB RIDER)"),
+        QStringLiteral("[03] ゲーム音用 (GAME IMPACT)"),
+        QStringLiteral("[04] BGM・音楽用 (BGM POCKET)"),
+        QStringLiteral("[05] 統合ミキサー＆声ディレクター (STREAM DIRECTOR)")};
+    for (const QString& n : names) list->addItem(QStringLiteral("MODEL 600 - ") + n);
+    list->setCurrentRow(0);
     body->addWidget(list);
-
     auto* props = new QVBoxLayout();
-    auto* open = new QPushButton(QStringLiteral(
-        "\U0001F39B️ OPEN STUDIO CONSOLE (専用コンソール画面を開く)"));
+    auto* open = new QPushButton(QStringLiteral("OPEN STUDIO CONSOLE  (専用コンソール画面を開く)"));
     open->setMinimumHeight(44);
-    QFont of = open->font(); of.setBold(true); of.setPointSizeF(of.pointSizeF() * 1.15); open->setFont(of);
     props->addWidget(open);
     auto add_check = [&](const QString& t, bool on) { auto* c = new QCheckBox(t); c->setChecked(on); props->addWidget(c); };
     auto add_slider = [&](const QString& t, int lo, int hi, int v, const QString& val) {
@@ -182,15 +180,12 @@ QWidget* make_obs_filter_panel() {
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    QFont base(QStringLiteral("IPAPGothic"));
-    base.setPointSize(10);
-    QApplication::setFont(base);
-
+    install_fonts();
     g_out = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QStringLiteral("gui-samples");
     QDir().mkpath(g_out);
     Gen gen;
 
-    // ---- Units 01-04 with live audio so the bus carries real telemetry ----
+    // ---- Units 01-05 with live audio so the bus carries real telemetry ----
     SharedBus bus_v, bus_c, bus_g, bus_b, bus_d;
     bus_v.open(MODE_VOICE); bus_c.open(MODE_COLLAB); bus_g.open(MODE_GAME);
     bus_b.open(MODE_BGM); bus_d.open(MODE_DIRECTOR);
@@ -200,103 +195,54 @@ int main(int argc, char** argv) {
     for (Engine* e : {&voice, &collab, &game, &bgm, &director}) e->prepare(48000.0f, 2);
     voice.params().input_gain_db.store(3.5f);
 
-    run(voice, 2, 4.0f, [&](int, float& l, float& r) { l = gen.voice(0.11f); r = l; });
-    run(collab, 2, 4.0f, [&](int, float& l, float& r) { l = gen.voice(0.06f); r = l; });
-    run(game, 2, 4.0f, [&](int i, float& l, float& r) {
-        const float burst = (i % 24000) < 900 ? 0.8f : 0.05f;   // Periodic gunshots.
-        l = gen.noise(burst); r = gen.noise(burst);
-    });
-    run(bgm, 2, 4.0f, [&](int i, float& l, float& r) {
+    auto music = [](int i, float& l, float& r) {
         const float t = static_cast<float>(i) / 48000.0f;
         l = 0.22f * std::sin(kTwoPi * 220.0f * t) + 0.12f * std::sin(kTwoPi * 330.0f * t);
         r = 0.22f * std::sin(kTwoPi * 220.0f * t + 0.6f) + 0.12f * std::sin(kTwoPi * 440.0f * t);
+    };
+    run(voice, 2, 4.0f, [&](int, float& l, float& r) { l = gen.voice(0.11f); r = l; });
+    run(collab, 2, 4.0f, [&](int, float& l, float& r) { l = gen.voice(0.06f); r = l; });
+    run(game, 2, 4.0f, [&](int i, float& l, float& r) {
+        const float burst = (i % 24000) < 900 ? 0.8f : 0.05f;
+        l = gen.noise(burst); r = gen.noise(burst);
     });
-    // Director hears the summed programme; level chosen to land near -12 LUFS.
+    run(bgm, 2, 4.0f, music);
     run(director, 2, 6.0f, [&](int i, float& l, float& r) {
         const float t = static_cast<float>(i) / 48000.0f;
         const float v = gen.voice(0.143f);
         l = v + 0.072f * std::sin(kTwoPi * 220.0f * t);
         r = v + 0.072f * std::sin(kTwoPi * 220.0f * t + 0.6f);
     });
-    std::printf("director integrated LUFS = %.1f\n", static_cast<double>(director.telemetry().lufs_i.load()));
-    // Re-run UNIT 01 last so its bus-derived flags reflect the full mix
-    // (game + BGM active -> no "solo chat" hint on the normal screenshot).
+    // Re-run voice last so its bus-derived flags reflect the full mix.
     run(voice, 2, 1.0f, [&](int, float& l, float& r) { l = gen.voice(0.11f); r = l; });
-
+    std::printf("director integrated LUFS = %.1f\n", static_cast<double>(director.telemetry().lufs_i.load()));
     std::printf("Rendering GUI samples into %s\n", g_out.toUtf8().constData());
 
-    // 01/02: UNIT 01 console, JA and EN.
-    {
-        StudioConsole con(&voice, &bus_v, false, false);
-        con.resize(520, 560);
-        con.set_language(UiLang::JA);
-        con.show();
-        QMetaObject::invokeMethod(&con, "refresh");
-        save(&con, QStringLiteral("01_console_unit01_ja.png"));
-        con.set_language(UiLang::EN);
-        QMetaObject::invokeMethod(&con, "refresh");
-        save(&con, QStringLiteral("02_console_unit01_en.png"));
-        con.hide();
-    }
+    console_shot(voice, bus_v, false, UiLang::JA, QStringLiteral("01_console_unit01_ja.png"), 560);
+    console_shot(voice, bus_v, false, UiLang::EN, QStringLiteral("02_console_unit01_en.png"), 560);
+    voice.telemetry().hint_bgm_misplug.store(1);
+    console_shot(voice, bus_v, false, UiLang::JA, QStringLiteral("03_console_unit01_states.png"), 560, [](StudioConsole& c) {
+        c.set_update_available(QStringLiteral("1.1.0"));
+        if (auto* pin = child<RackKey>(&c, "pin")) pin->setChecked(true);
+    });
+    voice.telemetry().hint_bgm_misplug.store(0);
+    console_shot(collab, bus_c, false, UiLang::JA, QStringLiteral("04_console_unit02_collab.png"), 560);
+    console_shot(game, bus_g, false, UiLang::JA, QStringLiteral("05_console_unit03_game.png"), 560);
+    console_shot(bgm, bus_b, false, UiLang::JA, QStringLiteral("06_console_unit04_bgm.png"), 560);
+    console_shot(director, bus_d, true, UiLang::JA, QStringLiteral("07_console_director_ja.png"), 1120);
+    console_shot(director, bus_d, true, UiLang::EN, QStringLiteral("08_console_director_en.png"), 1120);
+    console_shot(voice, bus_v, false, UiLang::JA, QStringLiteral("09_mini_unit01.png"), 560, [](StudioConsole& c) {
+        if (auto* fold = child<RackKey>(&c, "fold")) fold->click();
+    });
+    console_shot(director, bus_d, true, UiLang::JA, QStringLiteral("10_mini_director.png"), 1120, [](StudioConsole& c) {
+        if (auto* fold = child<RackKey>(&c, "fold")) fold->click();
+    });
 
-    // 03: UNIT 01 with a hint + the amber update lamp lit + pinned.
-    {
-        StudioConsole con(&voice, &bus_v, false, false);
-        con.resize(520, 560);
-        con.set_language(UiLang::JA);
-        con.set_update_available(QStringLiteral("1.1.0"));
-        con.show();
-        if (QPushButton* pin = find_button(&con, QStringLiteral("PIN"))) pin->setChecked(true);
-        voice.telemetry().hint_bgm_misplug.store(1);
-        QMetaObject::invokeMethod(&con, "refresh");
-        save(&con, QStringLiteral("03_console_unit01_hint_update.png"));
-        voice.telemetry().hint_bgm_misplug.store(0);
-        con.hide();
-    }
-
-    // 04/05: UNIT 05 director console with the mixer, JA and EN.
-    {
-        StudioConsole con(&director, &bus_d, true, true);
-        con.resize(1180, 560);
-        con.set_language(UiLang::JA);
-        con.show();
-        QMetaObject::invokeMethod(&con, "refresh");
-        save(&con, QStringLiteral("04_console_director_ja.png"));
-        con.set_language(UiLang::EN);
-        QMetaObject::invokeMethod(&con, "refresh");
-        save(&con, QStringLiteral("05_console_director_en.png"));
-        con.hide();
-    }
-
-    // 06/07: MINI meter-bar mode (UNIT 01 and UNIT 05).
-    {
-        StudioConsole con(&voice, &bus_v, false, false);
-        con.resize(520, 560);
-        con.set_language(UiLang::JA);
-        con.show();
-        if (QPushButton* mini = find_button(&con, QStringLiteral("MINI"))) mini->click();
-        QMetaObject::invokeMethod(&con, "refresh");
-        save(&con, QStringLiteral("06_console_mini_unit01.png"));
-        con.hide();
-    }
-    {
-        StudioConsole con(&director, &bus_d, true, true);
-        con.resize(1180, 560);
-        con.set_language(UiLang::JA);
-        con.show();
-        if (QPushButton* mini = find_button(&con, QStringLiteral("MINI"))) mini->click();
-        QMetaObject::invokeMethod(&con, "refresh");
-        save(&con, QStringLiteral("07_console_mini_director.png"));
-        con.hide();
-    }
-
-    // 08-11: calibration modal states (driven by real calibrator runs).
+    // Calibration modal states (driven by real calibrator runs).
     auto calib_shot = [&](const QString& name, float seconds, auto signal) {
         Engine e(MODE_VOICE);
         e.prepare(48000.0f, 2);
-        Skin skin;
-        CalibrationDialog dlg(&e, &skin, UiLang::JA);
-        dlg.resize(520, 300);
+        CalibrationDialog dlg(&e, UiLang::JA);
         dlg.show();                                  // Starts the 10 s measurement.
         pump();
         run(e, 2, seconds, signal);
@@ -304,23 +250,22 @@ int main(int argc, char** argv) {
         save(&dlg, name);
         dlg.hide();
     };
-    calib_shot(QStringLiteral("08_calibration_measuring.png"), 4.0f,
+    calib_shot(QStringLiteral("11_calibration_measuring.png"), 4.0f,
                [&](int, float& l, float& r) { l = gen.voice(0.10f); r = l; });
-    calib_shot(QStringLiteral("09_calibration_success.png"), 10.2f,
+    calib_shot(QStringLiteral("12_calibration_success.png"), 10.2f,
                [&](int, float& l, float& r) { l = gen.voice(0.10f); r = l; });
-    calib_shot(QStringLiteral("10_calibration_clip_warning.png"), 10.2f,
-               [&](int i, float& l, float& r) { l = ((i / 40) % 2) ? 1.0f : -1.0f; r = l; }); // Flat-top square.
-    calib_shot(QStringLiteral("11_calibration_no_voice.png"), 10.2f,
+    calib_shot(QStringLiteral("13_calibration_clip_warning.png"), 10.2f,
+               [&](int i, float& l, float& r) { l = ((i / 40) % 2) ? 1.0f : -1.0f; r = l; });
+    calib_shot(QStringLiteral("14_calibration_no_voice.png"), 10.2f,
                [&](int, float& l, float& r) { l = gen.noise(0.0005f); r = l; });
 
-    // 12: OBS filter panel approximation.
     {
         QWidget* panel = make_obs_filter_panel();
         panel->show();
-        save(panel, QStringLiteral("12_obs_filter_panel_approx.png"));
+        save(panel, QStringLiteral("15_obs_filter_panel_approx.png"));
         delete panel;
     }
 
     std::printf("Done: %d images.\n", g_count);
-    return g_count == 12 ? 0 : 1;
+    return g_count == kExpected ? 0 : 1;
 }

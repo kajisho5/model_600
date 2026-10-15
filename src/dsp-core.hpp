@@ -827,6 +827,7 @@ public:
     void reset() noexcept {
         hist_.fill(0);
         frames_total_ = 0; frames_voice_ = 0; pos_ = 0; peak_ = 0.0f; e_form_ = 0.0; e_all_ = 0.0;
+        clip_frames_ = 0; frame_clipped_ = false;
         flat_run_ = 0; clip_events_ = 0; running_ = false; done_ = false; aborted_ = false; form_.clear();
         result_gain_db_ = 0.0f; result_ok_ = false; result_clip_ = false; result_silent_ = false;
         result_ref_db_ = kSilenceDb;
@@ -850,7 +851,7 @@ public:
         e_form_ += static_cast<double>(f) * f;
         e_all_  += static_cast<double>(x) * x;
         // Flat-top: 3+ consecutive samples saturated at >= -0.1 dBFS.
-        if (a >= 0.98855f) { if (++flat_run_ == 3) ++clip_events_; }
+        if (a >= 0.98855f) { if (++flat_run_ == 3) { ++clip_events_; frame_clipped_ = true; } }
         else flat_run_ = 0;
         if (++pos_ >= frame_len_) {
             const float pk_db = lin_to_db(peak_);
@@ -862,6 +863,8 @@ public:
                 bin = bin < 0 ? 0 : (bin >= kBins ? kBins - 1 : bin);
                 ++hist_[bin]; ++frames_voice_;
             }
+            if (frame_clipped_) ++clip_frames_;
+            frame_clipped_ = false;
             ++frames_total_; pos_ = 0; peak_ = 0.0f; e_form_ = 0.0; e_all_ = 0.0;
             if (frames_total_ >= target_frames_) finish();
         }
@@ -873,6 +876,17 @@ public:
     bool  result_ok() const noexcept { return result_ok_; }
     bool  result_clipped() const noexcept { return result_clip_; }
     bool  result_silent() const noexcept { return result_silent_; }
+    int   clip_events() const noexcept { return clip_events_; }
+    // Total time (s) of 10 ms frames that contained a flat-top clip.
+    float clipped_seconds() const noexcept { return static_cast<float>(clip_frames_) * kFrameMs / 1000.0f; }
+    // Peak the calibration aims for: -6 dBFS plus the character's Lombard offset.
+    float target_peak_db() const noexcept {
+        switch (character_) {
+            case CHAR_SOFT_ASMR: return -6.0f;
+            case CHAR_BROADCAST: return -7.5f;
+            default:             return -9.0f;
+        }
+    }
     float voice_ratio() const noexcept {
         return frames_total_ ? static_cast<float>(frames_voice_) / static_cast<float>(frames_total_) : 0.0f;
     }
@@ -912,7 +926,8 @@ private:
     float fs_ = 48000.0f;
     int frame_len_ = 480, pos_ = 0, frames_total_ = 0, frames_voice_ = 0, target_frames_ = 1000;
     float peak_ = 0.0f; double e_form_ = 0.0, e_all_ = 0.0;
-    int flat_run_ = 0, clip_events_ = 0, character_ = CHAR_BROADCAST;
+    int flat_run_ = 0, clip_events_ = 0, clip_frames_ = 0, character_ = CHAR_BROADCAST;
+    bool frame_clipped_ = false;
     bool running_ = false, done_ = false, aborted_ = false;
     std::array<std::uint32_t, kBins> hist_{};
     SVF form_;
