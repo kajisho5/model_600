@@ -76,21 +76,24 @@ def vu(cx, cy, w, h, face, needle, caption):
 DIGI_BEZEL = 14                    # Bezel border around a digital meter window (px).
 
 
-def digi(cx, cy, w, h, caption, kind, value, bar, label, unit, aux=None, target=None):
+def digi(cx, cy, w, h, caption, kind, value, bar, label, unit, aux=None, target=None, hold=None):
     """Digital meter window: what it measures, a big 7-segment number and a segment bar.
 
-    kind: "level" (-36..0, green/amber/red), "ride" (-12..+12, centre zero), "phase" (-1..+1, centre zero).
+    kind: "dbfs"  peak level, -60..0 dBFS with OBS's default zones (green < -20, yellow < -9, red),
+                  plus a one-segment peak hold;
+          "ride"  gain, -12..+12 dB, centre zero;
+          "phase" correlation, -1..+1, centre zero.
     """
     return {"cx": cx, "cy": cy, "w": w, "h": h, "caption": caption,
             "digi": {"kind": kind, "value": value, "bar": bar, "label": label, "unit": unit,
-                     "aux": aux, "target": target,
+                     "aux": aux, "target": target, "hold": hold,
                      "win_w": w - 2 * DIGI_BEZEL, "win_h": h - 2 * DIGI_BEZEL}}
 
 
 def unit01():
     u = common("01", "VOCAL MASTER", "BROADCAST LEVELING AMPLIFIER")
-    u["vus"] = [digi(550, 172, 320, 184, "OUTPUT LEVEL", "level", "-13.6", -13.6, "SHORT-TERM", "LUFS",
-                     aux="PEAK  -1.2 dBTP")]
+    u["vus"] = [digi(550, 172, 320, 184, "OUTPUT LEVEL", "dbfs", "-6.2", -6.2, "PEAK", "dBFS",
+                     aux="SHORT-TERM  -13.6 LUFS", hold=-3.1)]
     u["knobs_big"] = [big("input", 166, 312, 54, "INPUT GAIN", "dB", -18, 24, [-18, -12, -6, 0, 6, 12, 18, 24], 3, 3.5),
                       output_trim()]
     u["knobs_step"] = [
@@ -117,8 +120,8 @@ def unit02():
     # Story: you talk -> the guest is dipped; otherwise the guest is ridden to the target.
     u = common("02", "COLLAB RIDER", "GUEST VOICE AUTO-RIDER",
                links={"x": 908, "y": 186, "dx": 30, "lit": [True] * 5})
-    u["vus"] = [digi(500, 160, 220, 152, "GUEST LEVEL", "level", "-16.8", -16.8, "SHORT-TERM", "LUFS",
-                     aux="TARGET -14.5", target=-14.5),
+    u["vus"] = [digi(500, 160, 220, 152, "GUEST LEVEL", "dbfs", "-9.4", -9.4, "PEAK", "dBFS",
+                     aux="S-TERM -16.8 LUFS", hold=-6.0),
                 digi(736, 160, 220, 152, "AUTO RIDE", "ride", "-3.5", -3.5, "CUT  /  BOOST", "dB")]
     u["knobs_big"] = [
         big("target", 166, 312, 54, "TARGET LOUDNESS", "LUFS", -24, -8, [-24, -20, -16, -12, -8], 2, -14.5),
@@ -135,8 +138,8 @@ def unit02():
 
 def unit03():
     u = common("03", "GAME IMPACT", "GAME AUDIO IMPACT LIMITER")
-    u["vus"] = [digi(550, 172, 320, 184, "GAME OUTPUT", "level", "-9.8", -9.8, "SHORT-TERM", "LUFS",
-                     aux="PEAK  -0.6 dBTP")]
+    u["vus"] = [digi(550, 172, 320, 184, "GAME OUTPUT", "dbfs", "-2.4", -2.4, "PEAK", "dBFS",
+                     aux="SHORT-TERM  -9.8 LUFS", hold=-0.8)]
     u["knobs_big"] = [
         big("ceiling", 166, 312, 54, "IMPACT CEILING", "dB", -12, 0, [-12, -9, -6, -3, 0], 1.5, -6.0),
         big("scoop", 366, 324, 42, "VOICE SCOOP", "dB", -12, 0, [-12, -9, -6, -3, 0], 1.5, -5.0, label_y=426),
@@ -154,8 +157,8 @@ def unit03():
 
 def unit04():
     u = common("04", "BGM POCKET", "MUSIC BED AUTO-DUCKER")
-    u["vus"] = [digi(550, 172, 320, 184, "BGM LEVEL", "level", "-24.5", -24.5, "SHORT-TERM", "LUFS",
-                     aux="PEAK  -12.1 dBTP")]
+    u["vus"] = [digi(550, 172, 320, 184, "BGM LEVEL", "dbfs", "-18.5", -18.5, "PEAK", "dBFS",
+                     aux="SHORT-TERM  -24.5 LUFS", hold=-15.2)]
     u["knobs_big"] = [
         big("pocket", 166, 312, 54, "POCKET DEPTH", "dB", -12, 0, [-12, -9, -6, -3, 0], 1.5, -8.5),
         output_trim(),
@@ -180,14 +183,17 @@ def unit05():
     u = common("05", "STREAM DIRECTOR", "MASTER LOUDNESS DIRECTOR", h=h, pro=True,
                links={"x": 908, "y": 176, "dx": 30, "lit": [True] * 5})
     u["displays"] = [
-        {"id": "m", "cx": 496, "cy": 96, "w": 112, "h": 56, "text": "-13.8", "label": "MOMENTARY"},
-        {"id": "s", "cx": 640, "cy": 96, "w": 112, "h": 56, "text": "-14.1", "label": "SHORT-TERM"},
+        {"id": "p", "cx": 496, "cy": 96, "w": 112, "h": 56, "text": "-1.0", "label": "MASTER PEAK  dBFS"},
+        {"id": "s", "cx": 640, "cy": 96, "w": 112, "h": 56, "text": "-14.1", "label": "SHORT-TERM  LUFS"},
         {"id": "i", "cx": 806, "cy": 96, "w": 152, "h": 56, "text": "-14.2", "label": "INTEGRATED  LUFS"},
     ]
-    names = [("01", "VOCAL", "-13.9"), ("02", "COLLAB", "-17.2"), ("03", "GAME", "-15.4"), ("04", "BGM", "-26.0")]
-    for i, (num, nm, val) in enumerate(names):
+    # Same moment as the unit samples: each channel's peak dBFS, short-term LUFS as the aux value.
+    names = [("01", "VOCAL", "-6.2", -3.1, "-13.6"), ("02", "COLLAB", "-9.4", -6.0, "-16.8"),
+             ("03", "GAME", "-2.4", -0.8, "-9.8"), ("04", "BGM", "-18.5", -15.2, "-24.5")]
+    for i, (num, nm, val, hold, lufs) in enumerate(names):
         cx = 178 + 248 * i
-        u["vus"].append(digi(cx, 290, 216, 148, "", "level", val, float(val), "SHORT-TERM", "LUFS"))
+        u["vus"].append(digi(cx, 290, 216, 148, "", "dbfs", val, float(val), "PEAK", "dBFS",
+                             aux=f"S {lufs} LUFS", hold=hold))
         u["vus"][-1]["chan"] = {"number": num, "name": nm}
         u["knobs_trim"].append({"cx": cx + 72, "cy": 418, "r": 17, "label": "TRIM", "value": 0.0, "min": -12, "max": 12})
     u["target"] = {"title": "YOUTUBE TARGET  -12 \u00b11.5 LUFS", "x": 96, "y": 506}
@@ -561,8 +567,8 @@ def seg_svg(d):
 
 
 def bar_zone(kind, centre):
-    if kind == "level":
-        return "green" if centre < -9 else ("amber" if centre < -3 else "red")
+    if kind == "dbfs":                      # OBS defaults: warning -20 dB, error -9 dB.
+        return "green" if centre < -20 else ("amber" if centre < -9 else "red")
     return "red" if centre < 0 else ("amber" if kind == "ride" else "green")
 
 
@@ -595,7 +601,7 @@ def meter_svg(v):
     if m["unit"]:
         o.append(text(x0 + len(chars) * cw + ufs * 0.5, y0 + ch_h, m["unit"], ufs, DIGI_LIT, 700, "start", ufs * 0.1, family))
     # Segment bar.
-    lo, hi, n = {"level": (-36.0, 0.0, 36), "ride": (-12.0, 12.0, 24), "phase": (-1.0, 1.0, 20)}[kind]
+    lo, hi, n = {"dbfs": (-60.0, 0.0, 48), "ride": (-12.0, 12.0, 24), "phase": (-1.0, 1.0, 20)}[kind]
     bx0, bx1 = pad, W - pad
     by = H * 0.70
     bh = max(3.0, H * 0.085)
@@ -604,8 +610,8 @@ def meter_svg(v):
     for i in range(n):
         a, b = lo + (hi - lo) * i / n, lo + (hi - lo) * (i + 1) / n
         c = (a + b) / 2
-        if kind == "level":
-            lit = c <= val
+        if kind == "dbfs":
+            lit = c <= val or (m["hold"] is not None and a <= m["hold"] < b)
         else:                                # Centre-zero: light from 0 toward the value.
             lit = (0 <= c <= val) or (val <= c <= 0)
         on, off = LED[bar_zone(kind, c)]
@@ -613,7 +619,7 @@ def meter_svg(v):
         o.append(f'<rect x="{x:.2f}" y="{by:.2f}" width="{pitch * 0.76:.2f}" height="{bh:.2f}" rx="{pitch * 0.12:.2f}" '
                  f'fill="{on if lit else off}"{" filter=\"url(#glow)\"" if lit else ""}/>')
     # Scale under the bar.
-    marks = {"level": [(-36, "-36"), (-24, "-24"), (-18, "-18"), (-12, "-12"), (-6, "-6"), (0, "0")],
+    marks = {"dbfs": [(-60, "-60"), (-40, "-40"), (-30, "-30"), (-20, "-20"), (-9, "-9"), (0, "0")],
              "ride": [(-12, "-12"), (-6, "-6"), (0, "0"), (6, "+6"), (12, "+12")],
              "phase": [(-1, "-1"), (0, "0"), (1, "+1")]}[kind]
     sy = by + bh + fs * 1.25
@@ -758,7 +764,8 @@ def main():
                 m = v["digi"]
                 write(f"unit{num}_meter_{i}", meter_svg(v), m["win_w"], m["win_h"], 6)
     # Retire the single-unit files from the first study.
-    for old in ("panel_decal.svg", "panel_decal.png", "vu_face.svg", "vu_face.png"):
+    for old in ("panel_decal.svg", "panel_decal.png", "vu_face.svg", "vu_face.png",
+                "unit05_seg_m.svg", "unit05_seg_m.png"):
         p = os.path.join(TEX, old)
         if os.path.exists(p):
             os.remove(p)

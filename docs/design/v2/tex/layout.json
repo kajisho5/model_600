@@ -76,13 +76,14 @@
           "h": 184,
           "caption": "OUTPUT LEVEL",
           "digi": {
-            "kind": "level",
-            "value": "-13.6",
-            "bar": -13.6,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": "PEAK  -1.2 dBTP",
+            "kind": "dbfs",
+            "value": "-6.2",
+            "bar": -6.2,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "SHORT-TERM  -13.6 LUFS",
             "target": null,
+            "hold": -3.1,
             "win_w": 292,
             "win_h": 156
           }
@@ -321,13 +322,14 @@
           "h": 152,
           "caption": "GUEST LEVEL",
           "digi": {
-            "kind": "level",
-            "value": "-16.8",
-            "bar": -16.8,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": "TARGET -14.5",
-            "target": -14.5,
+            "kind": "dbfs",
+            "value": "-9.4",
+            "bar": -9.4,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "S-TERM -16.8 LUFS",
+            "target": null,
+            "hold": -6.0,
             "win_w": 192,
             "win_h": 124
           }
@@ -346,6 +348,7 @@
             "unit": "dB",
             "aux": null,
             "target": null,
+            "hold": null,
             "win_w": 192,
             "win_h": 124
           }
@@ -534,13 +537,14 @@
           "h": 184,
           "caption": "GAME OUTPUT",
           "digi": {
-            "kind": "level",
-            "value": "-9.8",
-            "bar": -9.8,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": "PEAK  -0.6 dBTP",
+            "kind": "dbfs",
+            "value": "-2.4",
+            "bar": -2.4,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "SHORT-TERM  -9.8 LUFS",
             "target": null,
+            "hold": -0.8,
             "win_w": 292,
             "win_h": 156
           }
@@ -749,13 +753,14 @@
           "h": 184,
           "caption": "BGM LEVEL",
           "digi": {
-            "kind": "level",
-            "value": "-24.5",
-            "bar": -24.5,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": "PEAK  -12.1 dBTP",
+            "kind": "dbfs",
+            "value": "-18.5",
+            "bar": -18.5,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "SHORT-TERM  -24.5 LUFS",
             "target": null,
+            "hold": -15.2,
             "win_w": 292,
             "win_h": 156
           }
@@ -970,13 +975,14 @@
           "h": 148,
           "caption": "",
           "digi": {
-            "kind": "level",
-            "value": "-13.9",
-            "bar": -13.9,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": null,
+            "kind": "dbfs",
+            "value": "-6.2",
+            "bar": -6.2,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "S -13.6 LUFS",
             "target": null,
+            "hold": -3.1,
             "win_w": 188,
             "win_h": 120
           },
@@ -992,13 +998,14 @@
           "h": 148,
           "caption": "",
           "digi": {
-            "kind": "level",
-            "value": "-17.2",
-            "bar": -17.2,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": null,
+            "kind": "dbfs",
+            "value": "-9.4",
+            "bar": -9.4,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "S -16.8 LUFS",
             "target": null,
+            "hold": -6.0,
             "win_w": 188,
             "win_h": 120
           },
@@ -1014,13 +1021,14 @@
           "h": 148,
           "caption": "",
           "digi": {
-            "kind": "level",
-            "value": "-15.4",
-            "bar": -15.4,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": null,
+            "kind": "dbfs",
+            "value": "-2.4",
+            "bar": -2.4,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "S -9.8 LUFS",
             "target": null,
+            "hold": -0.8,
             "win_w": 188,
             "win_h": 120
           },
@@ -1036,13 +1044,14 @@
           "h": 148,
           "caption": "",
           "digi": {
-            "kind": "level",
-            "value": "-26.0",
-            "bar": -26.0,
-            "label": "SHORT-TERM",
-            "unit": "LUFS",
-            "aux": null,
+            "kind": "dbfs",
+            "value": "-18.5",
+            "bar": -18.5,
+            "label": "PEAK",
+            "unit": "dBFS",
+            "aux": "S -24.5 LUFS",
             "target": null,
+            "hold": -15.2,
             "win_w": 188,
             "win_h": 120
           },
@@ -1065,6 +1074,7 @@
             "unit": "",
             "aux": null,
             "target": null,
+            "hold": null,
             "win_w": 140,
             "win_h": 76
           }
@@ -1195,13 +1205,13 @@
       "ladders": [],
       "displays": [
         {
-          "id": "m",
+          "id": "p",
           "cx": 496,
           "cy": 96,
           "w": 112,
           "h": 56,
-          "text": "-13.8",
-          "label": "MOMENTARY"
+          "text": "-1.0",
+          "label": "MASTER PEAK  dBFS"
         },
         {
           "id": "s",
@@ -1210,7 +1220,7 @@
           "w": 112,
           "h": 56,
           "text": "-14.1",
-          "label": "SHORT-TERM"
+          "label": "SHORT-TERM  LUFS"
         },
         {
           "id": "i",
