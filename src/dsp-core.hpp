@@ -1456,7 +1456,7 @@ private:
         const BusLayout* b = bus_->raw();
         const std::int64_t t = now_us();
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
-            const auto& s = b->slots[i];
+            const auto& s = b->unit_slots[i];
             if (s.in_use.load(std::memory_order_acquire) == 0) continue;
             if (s.mode.load(std::memory_order_acquire) != MODE_GAME) continue;
             if (t - s.heartbeat_us.load(std::memory_order_acquire) > SharedBus::kMeterDecayUs) continue;

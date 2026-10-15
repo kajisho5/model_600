@@ -11,7 +11,7 @@
 //              automatic /tmp/sw_m600_bus_v1.mmap fallback when a sandbox
 //              rejects the POSIX object.
 //  - Fixed 4096-byte ABI (magic / version / size / reserved padding).
-//  - alignas(128) slots[16] to defeat false sharing on both x86_64 and ARM64.
+//  - alignas(128) unit_slots[16] to defeat false sharing on both x86_64 and ARM64.
 //  - PID + 500 ms heartbeat garbage collection, 150 ms meter decay.
 //  - Cooperative Master Summing Guard with an asymmetric 0.5 ms / 180 ms
 //    smoothing follower.
@@ -181,7 +181,7 @@ struct BusLayout {
     std::atomic<std::int64_t>  last_game_active_us;
     std::atomic<std::int64_t>  last_bgm_active_us;
 
-    // Explicit header pad so the slots[] array begins on a 128-byte boundary
+    // Explicit header pad so the unit_slots[] array begins on a 128-byte boundary
     // and the whole struct is exactly 4096 bytes. Verified by static_assert.
     char header_padding[256
         - sizeof(std::atomic<std::uint32_t>)        // magic
@@ -197,15 +197,15 @@ struct BusLayout {
         - sizeof(std::atomic<std::int64_t>) * 3];   // last_*_active_us
 
     // --- Per-instance slots -------------------------------------------------
-    alignas(128) InstanceSlot slots[kMaxSlots];     // 16 * 128 = 2048 bytes.
+    alignas(128) InstanceSlot unit_slots[kMaxSlots];     // 16 * 128 = 2048 bytes.
 
     // --- Trailing reserve so future fields never break the 4096 ABI ---------
     char reserved_padding[4096 - 256 - (128 * kMaxSlots)];
 };
 static_assert(sizeof(BusLayout) == kBusStructSize,
               "BusLayout must be exactly 4096 bytes (frozen ABI)");
-static_assert(offsetof(BusLayout, slots) == 256,
-              "slots[] must start at the 256-byte boundary (frozen ABI)");
+static_assert(offsetof(BusLayout, unit_slots) == 256,
+              "unit_slots[] must start at the 256-byte boundary (frozen ABI)");
 
 // -----------------------------------------------------------------------------
 //  RAII wrapper that maps the bus, claims a slot and runs maintenance.
@@ -241,7 +241,7 @@ public:
     void shutdown() noexcept {
         stop_maintenance_thread();
         if (view_ && my_slot_index_ >= 0) {
-            view_->slots[my_slot_index_].reset();
+            view_->unit_slots[my_slot_index_].reset();
         }
         unmap_shared_region();
         my_slot_index_ = -1;
@@ -252,7 +252,7 @@ public:
     BusLayout*       raw()       noexcept { return view_; }
     const BusLayout* raw() const noexcept { return view_; }
 
-    InstanceSlot& my_slot() noexcept { return view_->slots[my_slot_index_]; }
+    InstanceSlot& my_slot() noexcept { return view_->unit_slots[my_slot_index_]; }
     int my_index() const noexcept { return my_slot_index_; }
 
     // ---- Audio-thread safe helpers (wait-free, no allocation) --------------
@@ -260,13 +260,13 @@ public:
     // Called once per processed block to keep this slot's liveness fresh.
     void beat() noexcept {
         if (!valid()) return;
-        view_->slots[my_slot_index_].heartbeat_us.store(now_us(), std::memory_order_release);
+        view_->unit_slots[my_slot_index_].heartbeat_us.store(now_us(), std::memory_order_release);
     }
 
     // Publish the pitch tracker centroid (UNIT 01) for consumers to pick up.
     void publish_voice_center(float hz, float activity) noexcept {
         if (!valid()) return;
-        auto& s = view_->slots[my_slot_index_];
+        auto& s = view_->unit_slots[my_slot_index_];
         s.voice_center_hz.store(hz, std::memory_order_release);
         s.voice_activity.store(activity, std::memory_order_release);
         if (activity > 0.5f)
@@ -279,7 +279,7 @@ public:
         if (!view_) { if (out_activity) *out_activity = 0.0f; return best_hz; }
         const std::int64_t t = now_us();
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
-            const auto& s = view_->slots[i];
+            const auto& s = view_->unit_slots[i];
             if (s.in_use.load(std::memory_order_acquire) == 0) continue;
             if (s.mode.load(std::memory_order_acquire) != MODE_VOICE) continue;
             if (t - s.heartbeat_us.load(std::memory_order_acquire) > kHeartbeatGcUs) continue;
@@ -295,7 +295,7 @@ public:
                            float gr_db, float duck_db, float out_energy,
                            bool loud_now) noexcept {
         if (!valid()) return;
-        auto& s = view_->slots[my_slot_index_];
+        auto& s = view_->unit_slots[my_slot_index_];
         s.true_peak_db.store(true_peak_db, std::memory_order_release);
         s.rms_db.store(rms_db, std::memory_order_release);
         s.short_term_lufs.store(st_lufs, std::memory_order_release);
@@ -313,12 +313,12 @@ public:
 
     void set_mic_muted(bool muted) noexcept {
         if (!valid()) return;
-        view_->slots[my_slot_index_].is_mic_muted.store(muted ? 1 : 0, std::memory_order_release);
+        view_->unit_slots[my_slot_index_].is_mic_muted.store(muted ? 1 : 0, std::memory_order_release);
     }
 
     void set_signal_present(bool present) noexcept {
         if (!valid()) return;
-        view_->slots[my_slot_index_].signal_present.store(present ? 1 : 0, std::memory_order_release);
+        view_->unit_slots[my_slot_index_].signal_present.store(present ? 1 : 0, std::memory_order_release);
     }
 
     // The cooperative ceiling scale (0..1). A unit multiplies its limiter
@@ -355,7 +355,7 @@ public:
         const std::int64_t t = now_us();
         bool any_mic_live = false, mic_muted = true;
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
-            const auto& s = view_->slots[i];
+            const auto& s = view_->unit_slots[i];
             if (s.in_use.load(std::memory_order_acquire) == 0) continue;
             if (s.mode.load(std::memory_order_acquire) != MODE_VOICE) continue;
             if (t - s.heartbeat_us.load(std::memory_order_acquire) > kHeartbeatGcUs) continue;
@@ -505,7 +505,7 @@ private:
             view_->last_voice_active_us.store(t, std::memory_order_relaxed);
             view_->last_game_active_us.store(t, std::memory_order_relaxed);
             view_->last_bgm_active_us.store(t, std::memory_order_relaxed);
-            for (std::size_t i = 0; i < kMaxSlots; ++i) view_->slots[i].reset();
+            for (std::size_t i = 0; i < kMaxSlots; ++i) view_->unit_slots[i].reset();
             view_->magic.store(kBusMagic, std::memory_order_release);
             view_->init_state.store(BUS_READY, std::memory_order_release);
             return;
@@ -523,7 +523,7 @@ private:
         const std::int64_t t = now_us();
         const std::int32_t pid = self_pid();
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
-            auto& s = view_->slots[i];
+            auto& s = view_->unit_slots[i];
             const bool busy = s.in_use.load(std::memory_order_acquire) != 0;
             const bool stale = busy &&
                 (t - s.heartbeat_us.load(std::memory_order_acquire) > kHeartbeatGcUs);
@@ -574,7 +574,7 @@ private:
     void gc_and_decay() noexcept {
         const std::int64_t t = now_us();
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
-            auto& s = view_->slots[i];
+            auto& s = view_->unit_slots[i];
             if (s.in_use.load(std::memory_order_acquire) == 0) continue;
             const std::int64_t age = t - s.heartbeat_us.load(std::memory_order_acquire);
             if (age > kHeartbeatGcUs) {
@@ -606,7 +606,7 @@ private:
     void update_summing_guard(float dt_s) noexcept {
         float sum_energy = 0.0f;
         for (std::size_t i = 0; i < kMaxSlots; ++i) {
-            const auto& s = view_->slots[i];
+            const auto& s = view_->unit_slots[i];
             if (s.in_use.load(std::memory_order_acquire) == 0) continue;
             sum_energy += s.output_energy.load(std::memory_order_acquire);
         }

@@ -27,13 +27,13 @@
 #include <QElapsedTimer>
 #include <QPixmap>
 #include <QPointer>
+#include <QSlider>
 #include <QString>
 #include <QVector>
 #include <QWidget>
 
 class QLabel;
 class QPushButton;
-class QSlider;
 class QComboBox;
 class QCheckBox;
 class QProgressBar;
@@ -43,6 +43,9 @@ class QShowEvent;
 class QHideEvent;
 class QWheelEvent;
 class QMouseEvent;
+class QHBoxLayout;
+class QVBoxLayout;
+class QGridLayout;
 
 namespace sw::model600 { class SharedBus; }
 
@@ -203,9 +206,9 @@ private slots:
 
 private:
     void build_ui();
-    void build_header(class QHBoxLayout* into);
-    void build_unit01(class QVBoxLayout* into);
-    void build_unit05(class QVBoxLayout* into);
+    void build_header(QHBoxLayout* into);
+    void build_unit01(QVBoxLayout* into);
+    void build_unit05(QVBoxLayout* into);
     void rebuild_chassis_pixmap();
     void relabel();
     void clamp_to_screen();      // showEvent geometry guard.
