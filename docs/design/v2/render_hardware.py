@@ -996,6 +996,37 @@ def shot_sprites():
     print("[v2] sprites done:", len(manifest))
 
 
+def shot_calib():
+    """Static plate of the INPUT CALIBRATOR module (calibrator_mock.py writes its layout and print)."""
+    with open(os.path.join(TEX, "calib_layout.json")) as f:
+        cal = json.load(f)
+    sc = reset(48 if PREVIEW else 256)
+    world(sc, strength=0.8)
+    studio_lights()
+    materials()
+    w, h = cal["panel"]["w"], cal["panel"]["h"]
+    set_frame(w, h)
+    box((w * S, h * S, 0.12), P(w / 2, h / 2, -0.06), M["panel"], bevel=0.02)
+    plane(w * S, h * S, P(w / 2, h / 2, 0.003),
+          mat_image("CalibDecal", os.path.join(TEX, "calib_decal.png"), rough=0.55, decal=True))
+    for x, y in cal["screws"]:
+        screw(x, y, 0.0)
+    m = cal["meter"]
+    digital_meter("cal", 0, {"cx": m["cx"], "cy": m["cy"], "w": m["w"], "h": m["h"],
+                             "digi": {"win_w": m["w"] - 28, "win_h": m["h"] - 28}}, 0.0, content=False)
+    g = cal["seg"]
+    seg_display("cal", {"id": "t", "cx": g["cx"], "cy": g["cy"], "w": g["w"], "h": g["h"]}, 0.0, content=False)
+    ladder_frame(cal["ladder"], 0.0)
+    lamp_bezel(cal["lamp"]["cx"], cal["lamp"]["cy"], 0.0)
+    for x in cal["steps"]["xs"]:
+        led_bezel(x, cal["steps"]["y"], 0.0)
+    for b in cal["buttons"]:
+        button_bezel(b["cx"], b["cy"], b["w"], b["h"], 0.0)
+        hide_from_camera(created(button_cap, b["cx"], b["cy"], b["w"], b["h"], b["color"], False, 0.0))
+    cam_front(sc, w, h, 1 if PREVIEW else 2)
+    render(sc, "calib_bg.png")
+
+
 if __name__ == "__main__":
     if SHOT == "front":
         for n in (POS or ["01"]):
@@ -1010,5 +1041,7 @@ if __name__ == "__main__":
         shot_backgrounds(POS or list(UNITS))
     elif SHOT == "sprites":
         shot_sprites()
+    elif SHOT == "calib":
+        shot_calib()
     else:
         raise SystemExit(f"unknown shot {SHOT}")
