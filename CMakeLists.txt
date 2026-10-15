@@ -68,6 +68,17 @@ endif()
 set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
+# Older Qt 6 builds (e.g. the obs-deps Qt) add "-framework AGL" to
+# WrapOpenGL::WrapOpenGL even when AGL is absent; the macOS 26 SDK (Xcode 26)
+# no longer ships AGL, so the link fails. Nothing here uses AGL: drop it.
+if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+    get_target_property(m600_gl_libs WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+    if(m600_gl_libs)
+        list(FILTER m600_gl_libs EXCLUDE REGEX "AGL")
+        set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES INTERFACE_LINK_LIBRARIES "${m600_gl_libs}")
+    endif()
+endif()
+
 # --- Embedded speech recognizer (whisper.cpp) --------------------------------
 set(M600_PLUGIN_WHISPER OFF)
 if(MODEL600_BUILD_PLUGIN AND MODEL600_PRO_EDITION AND MODEL600_VOICE_WHISPER)
