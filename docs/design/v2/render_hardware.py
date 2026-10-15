@@ -1,13 +1,14 @@
 # =============================================================================
 #  MODEL 600 GUI v2 ("hardware") - Blender render of the design samples.
 #
-#  Builds the whole UNIT 01 faceplate in 3D from tex/layout.json (the same
-#  layout that produced the printed legends), then renders:
-#    knob   -> renders/knob_study.png   (4 knob candidates, 3/4 view)
-#    front  -> renders/unit01_front.png (orthographic: the plugin window itself)
-#    hero   -> renders/unit01_hero.png  (perspective product shot for SNS)
+#  Builds each unit faceplate in 3D from tex/layout.json (the same layout that
+#  produced the printed legends), then renders:
+#    knob          -> renders/knob_study.png     (4 knob candidates)
+#    front NN      -> renders/unitNN_front.png   (orthographic: the plugin window itself)
+#    hero          -> renders/unit01_hero.png    (perspective product shot of UNIT 01)
+#    rack          -> renders/rack_hero.png      (all five units stacked, 4:5 portrait)
 #
-#    blender -b --factory-startup -P docs/design/v2/render_hardware.py -- front [--preview]
+#    blender -b --factory-startup -P docs/design/v2/render_hardware.py -- front 02 [--preview]
 # =============================================================================
 import json
 import math
@@ -21,20 +22,31 @@ from mathutils import Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEX = os.path.join(HERE, "tex")
 OUT = os.path.join(HERE, "renders")
-ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else ["front"]
+ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else ["front", "01"]
 SHOT = ARGS[0]
 PREVIEW = "--preview" in ARGS
+POS = [a for a in ARGS[1:] if not a.startswith("--")]
 
 with open(os.path.join(TEX, "layout.json")) as f:
-    LAY = json.load(f)
-PW, PH = LAY["panel"]["w"], LAY["panel"]["h"]
+    LAYOUT = json.load(f)
+UNITS = LAYOUT["units"]
+FACE_W, FACE_H = LAYOUT["face"]["w"], LAYOUT["face"]["h"]
 S = 0.01                       # Blender metres per logical px.
 SWEEP = 135.0
 
+# Current unit frame: panel size and the Blender position of the panel centre.
+PW, PH = 1100, 480
+ORIGIN = Vector((0.0, 0.0, 0.0))
+
 
 def P(x, y, z=0.0):
-    """Layout px (origin top-left, y down) -> Blender (origin centre, y up)."""
-    return Vector(((x - PW / 2) * S, (PH / 2 - y) * S, z))
+    """Layout px (origin top-left, y down) -> Blender (unit centre at ORIGIN, y up)."""
+    return Vector(((x - PW / 2) * S + ORIGIN.x, (PH / 2 - y) * S + ORIGIN.y, z + ORIGIN.z))
+
+
+def set_frame(w, h, origin=(0.0, 0.0, 0.0)):
+    global PW, PH, ORIGIN
+    PW, PH, ORIGIN = w, h, Vector(origin)
 
 
 def srgb(h, a=1.0):
@@ -104,12 +116,15 @@ def area_light(name, loc, target, energy, size, color="#FFFFFF", size_y=None):
     return o
 
 
-def studio_lights(key=5200.0, fill=900.0, rim=2600.0):
+def studio_lights(key=5200.0, fill=900.0, rim=2600.0, k=1.0, centre=(0.0, 0.0, 0.0)):
     # Long strip softbox high on the upper-left, grazing the panel: dark plate,
     # bright edges on every knob. Warm key, cool fill, white rim from behind.
-    area_light("Key", (-9.0, 5.5, 6.5), (0, 0, 0), key, 1.6, "#FFF1E0", size_y=14.0)
-    area_light("Fill", (9.0, -6.0, 6.0), (0, 0, 0), fill, 8.0, "#D9E4FF")
-    area_light("Rim", (0.0, 10.0, 4.5), (0, 0, 0), rim, 14.0, "#FFFFFF", size_y=1.2)
+    # `k` scales the rig for bigger subjects (energy follows the inverse square).
+    c = Vector(centre)
+    e = k * k
+    area_light("Key", c + Vector((-9.0, 5.5, 6.5)) * k, c, key * e, 1.6 * k, "#FFF1E0", size_y=14.0 * k)
+    area_light("Fill", c + Vector((9.0, -6.0, 6.0)) * k, c, fill * e, 8.0 * k, "#D9E4FF")
+    area_light("Rim", c + Vector((0.0, 10.0, 4.5)) * k, c, rim * e, 14.0 * k, "#FFFFFF", size_y=1.2 * k)
 
 
 # ---- Materials ---------------------------------------------------------------------
@@ -162,7 +177,7 @@ def mat_brushed_panel():
     ramp.inputs["To Max"].default_value = 0.42
     nt.links.new(noise.outputs["Fac"], ramp.inputs["Value"])
     nt.links.new(ramp.outputs["Result"], p.inputs["Roughness"])
-    # Anisotropy tangent along world X (the plate is never rotated).
+    # Anisotropy tangent along world X (the plates are never rotated).
     tan = nt.nodes.new("ShaderNodeCombineXYZ")
     tan.inputs["X"].default_value = 1.0
     nt.links.new(tan.outputs["Vector"], p.inputs["Tangent"])
@@ -192,7 +207,12 @@ def mat_radial_aluminium():
     return m
 
 
+IMAGES = {}
+
+
 def mat_image(name, path, emission_strength=0.0, rough=0.5, decal=False):
+    if name in IMAGES:
+        return IMAGES[name]
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
@@ -216,6 +236,7 @@ def mat_image(name, path, emission_strength=0.0, rough=0.5, decal=False):
         nt.links.new(p.outputs["BSDF"], mix.inputs[2])
         nt.links.new(mix.outputs["Shader"], out.inputs["Surface"])
         m.blend_method = "HASHED"
+    IMAGES[name] = m
     return m
 
 
@@ -248,6 +269,14 @@ def cyl(r, depth, loc, mat=None, verts=96, bevel=0.0, r2=None, rot=(0, 0, 0)):
         b = o.modifiers.new("B", "BEVEL"); b.width = bevel; b.segments = 3; b.limit_method = "ANGLE"
     bpy.ops.object.shade_smooth()
     if mat: o.data.materials.append(mat)
+    return o
+
+
+def plane(w, h, loc, mat):
+    bpy.ops.mesh.primitive_plane_add(size=1, location=loc)
+    o = bpy.context.active_object
+    o.scale = (w, h, 1)
+    o.data.materials.append(mat)
     return o
 
 
@@ -288,11 +317,16 @@ def boolean_cut(target, cutter):
     cutter.hide_viewport = True
 
 
-# ---- Parts --------------------------------------------------------------------------
+# ---- Materials library ------------------------------------------------------------------
 M = {}
+LAMP_COLORS = {"amber": ("#FF9A2E", "#FF9426", "#3A2C1E"),
+               "red": ("#E5402F", "#FF2A1A", "#3C1512"),
+               "green": ("#3FD07A", "#38E07E", "#16301F")}
 
 
 def materials():
+    M.clear()
+    IMAGES.clear()
     M["panel"] = mat_brushed_panel()
     M["black"] = mat_principled("BlackKnurl", "#0E0F11", rough=0.32, coat=0.4)
     M["bakelite"] = mat_principled("Bakelite", "#0A0A0B", rough=0.18, coat=0.8)
@@ -300,9 +334,12 @@ def materials():
     M["chrome"] = mat_principled("Chrome", "#E6E8EA", metallic=1.0, rough=0.06)
     M["steel"] = mat_principled("Steel", "#9EA3A9", metallic=1.0, rough=0.28)
     M["white"] = mat_principled("Paint", "#F2EEE4", rough=0.45)
+    M["red_paint"] = mat_principled("TrimRed", "#D8392B", rough=0.4)
     M["bezel"] = mat_principled("Bezel", "#101113", metallic=0.2, rough=0.45, coat=0.3)
     M["glass"] = mat_principled("Glass", "#FFFFFF", rough=0.03, transmission=1.0, ior=1.45, spec=0.5)
     M["needle"] = mat_principled("Needle", "#101010", rough=0.5)
+    M["recess"] = mat_principled("Recess", "#050506", rough=0.8)
+    M["rack"] = mat_principled("Rack", "#141518", metallic=0.6, rough=0.5)
     # Illuminated caps: frosted lenses. Off = dim tinted glass, on = saturated glow.
     M["amber_off"] = mat_principled("AmberOff", "#3A2C1E", rough=0.5, coat=0.5, emission="#FFB347", estr=0.025)
     M["amber_on"] = mat_principled("AmberOn", "#FF9A2E", rough=0.35, coat=0.7, emission="#FF9426", estr=4.0)
@@ -311,9 +348,15 @@ def materials():
     M["jewel"] = mat_principled("Jewel", "#C21A12", rough=0.08, coat=1.0, emission="#FF2A12", estr=1.6,
                                 transmission=0.4, ior=1.6)
     M["green_on"] = mat_principled("GreenOn", "#3FD07A", rough=0.2, emission="#47E28A", estr=2.5)
-    M["recess"] = mat_principled("Recess", "#050506", rough=0.8)
+    # Pilot lamps and LED ladder segments.
+    for name, (base, glow, dark) in LAMP_COLORS.items():
+        M[f"lamp_{name}_on"] = mat_principled(f"Lamp{name}On", base, rough=0.15, coat=1.0, emission=glow, estr=1.8)
+        M[f"lamp_{name}_off"] = mat_principled(f"Lamp{name}Off", dark, rough=0.12, coat=1.0, emission=glow, estr=0.02)
+        M[f"seg_{name}_on"] = mat_principled(f"Seg{name}On", base, rough=0.3, emission=glow, estr=1.6)
+        M[f"seg_{name}_off"] = mat_principled(f"Seg{name}Off", dark, rough=0.35, coat=0.5)
 
 
+# ---- Parts --------------------------------------------------------------------------
 def screw(x, y, z):
     head = cyl(0.075, 0.03, P(x, y, z + 0.015), M["steel"], 48, bevel=0.01)
     for rot in (math.pi / 4, -math.pi / 4):
@@ -322,21 +365,23 @@ def screw(x, y, z):
     return head
 
 
+def index_dir(angle):
+    return Vector((math.sin(math.radians(angle)), math.cos(math.radians(angle)), 0))
+
+
 def knob_machined(cx, cy, r_px, angle, z0):
     """Black knurled skirt + concentric machined aluminium cap + white index."""
     r = r_px * S
-    cyl(r, 0.26, P(cx, cy, z0 + 0.13), M["black"], 128, bevel=0.02)
-    ridges = 120
+    h = 0.26 * (r_px / 60) ** 0.5
+    cyl(r, h, P(cx, cy, z0 + h / 2), M["black"], 128, bevel=0.02)
+    ridges = int(120 * r_px / 60)
     for i in range(ridges):
         a = 2 * math.pi * i / ridges
-        o = box((0.012, 0.022, 0.2), P(cx, cy, z0 + 0.12) + Vector((math.cos(a) * r, math.sin(a) * r, 0)),
-                M["black"], bevel=0.003, segs=2, rot=(0, 0, a))
-    cyl(r * 0.80, 0.08, P(cx, cy, z0 + 0.30), M["black"], 128, bevel=0.02, r2=r * 0.74)
-    cyl(r * 0.70, 0.04, P(cx, cy, z0 + 0.345), M["alu"], 128, bevel=0.012)
-    # Index line on the skirt top bevel, pointing at `angle`.
-    t = math.radians(-angle)
-    d = Vector((math.sin(-t), math.cos(t), 0)) if False else Vector((math.sin(math.radians(angle)), math.cos(math.radians(angle)), 0))
-    mid = P(cx, cy, z0 + 0.338) + d * (r * 0.76)
+        box((0.012, 0.022, h * 0.77), P(cx, cy, z0 + h * 0.46) + Vector((math.cos(a) * r, math.sin(a) * r, 0)),
+            M["black"], bevel=0.003, segs=2, rot=(0, 0, a))
+    cyl(r * 0.80, 0.08, P(cx, cy, z0 + h + 0.04), M["black"], 128, bevel=0.02, r2=r * 0.74)
+    cyl(r * 0.70, 0.04, P(cx, cy, z0 + h + 0.085), M["alu"], 128, bevel=0.012)
+    mid = P(cx, cy, z0 + h + 0.078) + index_dir(angle) * (r * 0.76)
     box((0.016, r * 0.20, 0.012), mid, M["white"], rot=(0, 0, -math.radians(angle)))
 
 
@@ -344,7 +389,6 @@ def knob_chicken(cx, cy, r_px, angle, z0):
     """Bakelite chicken-head selector with a white pointer line."""
     r = r_px * S
     cyl(r * 1.05, 0.10, P(cx, cy, z0 + 0.05), M["bakelite"], 96, bevel=0.02)
-    # Teardrop outline (local, pointing +Y), rotated to `angle`.
     pts = []
     head_r = r * 0.62
     tip = r * 1.55
@@ -356,8 +400,7 @@ def knob_chicken(cx, cy, r_px, angle, z0):
     c = P(cx, cy)
     world_pts = [(c.x + x * math.cos(rot) - y * math.sin(rot), c.y + x * math.sin(rot) + y * math.cos(rot)) for x, y in pts]
     prism(world_pts, z0 + 0.10, z0 + 0.30, M["bakelite"], bevel=0.012, taper=0.86, centre=(c.x, c.y))
-    d = Vector((math.sin(math.radians(angle)), math.cos(math.radians(angle)), 0))
-    mid = P(cx, cy, z0 + 0.302) + d * (r * 0.70)
+    mid = P(cx, cy, z0 + 0.302) + index_dir(angle) * (r * 0.70)
     box((0.014, r * 0.70, 0.006), mid, M["white"], rot=(0, 0, -math.radians(angle)))
 
 
@@ -370,19 +413,16 @@ def knob_fluted(cx, cy, r_px, angle, z0):
         a = 2 * math.pi * i / 18
         c = cyl(r * 0.12, 0.4, P(cx, cy, z0 + 0.2) + Vector((math.cos(a) * r * 0.9, math.sin(a) * r * 0.9, 0)), verts=24)
         boolean_cut(body, c)
-    d = Vector((math.sin(math.radians(angle)), math.cos(math.radians(angle)), 0))
-    mid = P(cx, cy, z0 + 0.335) + d * (r * 0.45)
+    mid = P(cx, cy, z0 + 0.335) + index_dir(angle) * (r * 0.45)
     box((0.016, r * 0.7, 0.012), mid, M["white"], rot=(0, 0, -math.radians(angle)))
 
 
 def knob_trim(cx, cy, r_px, angle, z0):
-    """Small aluminium trim knob with a red index (study variant)."""
+    """Small aluminium trim knob with a red index."""
     r = r_px * S
     cyl(r, 0.18, P(cx, cy, z0 + 0.09), M["alu"], 96, bevel=0.02)
-    d = Vector((math.sin(math.radians(angle)), math.cos(math.radians(angle)), 0))
-    mid = P(cx, cy, z0 + 0.185) + d * (r * 0.55)
-    red = mat_principled("TrimRed", "#D8392B", rough=0.4)
-    box((0.014, r * 0.7, 0.01), mid, red, rot=(0, 0, -math.radians(angle)))
+    mid = P(cx, cy, z0 + 0.185) + index_dir(angle) * (r * 0.55)
+    box((0.014, r * 0.7, 0.01), mid, M["red_paint"], rot=(0, 0, -math.radians(angle)))
 
 
 def toggle(cx, cy, on, horizontal, z0, k=1.35):
@@ -395,7 +435,7 @@ def toggle(cx, cy, on, horizontal, z0, k=1.35):
     axis = Vector((math.sin(tilt), 0, math.cos(tilt))) if horizontal else Vector((0, math.sin(tilt), math.cos(tilt)))
     base = P(cx, cy, z0 + 0.1)
     rot = (0, tilt, 0) if horizontal else (-tilt, 0, 0)
-    lever = cyl(0.022 * k, 2 * half, base + axis * half, M["chrome"], 32, r2=0.03 * k, rot=rot)
+    cyl(0.022 * k, 2 * half, base + axis * half, M["chrome"], 32, r2=0.03 * k, rot=rot)
     tip = base + axis * (2 * half)
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.034 * k, location=tip)
     bpy.ops.object.shade_smooth()
@@ -405,8 +445,7 @@ def toggle(cx, cy, on, horizontal, z0, k=1.35):
 def push_button(cx, cy, w, h, color, lit, z0):
     box((w * S + 0.06, h * S + 0.06, 0.05), P(cx, cy, z0 + 0.025), M["bezel"], bevel=0.015)
     box((w * S + 0.01, h * S + 0.01, 0.03), P(cx, cy, z0 + 0.06), M["recess"])
-    mat = {("amber", True): M["amber_on"], ("amber", False): M["amber_off"],
-           ("red", True): M["red_on"], ("red", False): M["red_off"]}[(color, lit)]
+    mat = M[f"{color}_{'on' if lit else 'off'}"]
     box((w * S - 0.02, h * S - 0.02, 0.08), P(cx, cy, z0 + 0.1), mat, bevel=0.025)
 
 
@@ -427,91 +466,136 @@ def led(cx, cy, z0, on=True):
     o.data.materials.append(M["green_on"] if on else M["recess"])
 
 
-def vu_meter(z0):
-    v = LAY["vu"]
+def pilot_lamp(cx, cy, color, lit, z0):
+    """Panel pilot lamp: knurled chrome bezel + smooth domed lens."""
+    cyl(0.115, 0.05, P(cx, cy, z0 + 0.025), M["chrome"], 64, bevel=0.012)
+    cyl(0.085, 0.03, P(cx, cy, z0 + 0.06), M["recess"], 64)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.085, location=P(cx, cy, z0 + 0.06), segments=48, ring_count=24)
+    o = bpy.context.active_object
+    o.scale.z = 0.62
+    bpy.ops.object.shade_smooth()
+    o.data.materials.append(M[f"lamp_{color}_{'on' if lit else 'off'}"])
+
+
+def ladder(L, z0):
+    """Row of rectangular LEDs in a black window."""
+    pitch = 16
+    n = L["n"]
+    x0 = L["cx"] - (n * pitch) / 2 + pitch / 2
+    box(((n * pitch + 12) * S, 30 * S, 0.04), P(L["cx"], L["cy"], z0 + 0.02), M["bezel"], bevel=0.01)
+    box(((n * pitch + 4) * S, 22 * S, 0.02), P(L["cx"], L["cy"], z0 + 0.04), M["recess"])
+    for i in range(n):
+        frac = i / max(1, n - 1)
+        color = L["colors"][0][1]
+        for start, c in L["colors"]:
+            if frac >= start:
+                color = c
+        mat = M[f"seg_{color}_{'on' if i < L['lit'] else 'off'}"]
+        box((11 * S, 16 * S, 0.03), P(x0 + i * pitch, L["cy"], z0 + 0.055), mat, bevel=0.004, segs=2)
+
+
+def seg_display(num, d, z0):
+    """7-segment window: bezel, emissive digit plate, glass."""
+    cx, cy, w, h = d["cx"], d["cy"], d["w"], d["h"]
+    frame = box(((w + 16) * S, (h + 16) * S, 0.12), P(cx, cy, z0 + 0.06), M["bezel"], bevel=0.03)
+    hole = box((w * S, h * S, 0.5), P(cx, cy, z0 + 0.1))
+    boolean_cut(frame, hole)
+    mat = mat_image(f"Seg{num}{d['id']}", os.path.join(TEX, f"unit{num}_seg_{d['id']}.png"), emission_strength=1.6, rough=0.4)
+    plane(w * S, h * S, P(cx, cy, z0 + 0.01), mat)
+    plane(w * S, h * S, P(cx, cy, z0 + 0.09), M["glass"])
+
+
+def deflection(kind, value):
+    if kind == "vu":
+        return -46 + 92 * (10 ** (value / 20) / 10 ** (3 / 20))
+    if kind == "ride":
+        return 46 * value / 12
+    return 46 * value
+
+
+def vu_meter(v, z0):
     cx, cy, w, h, fw, fh = v["cx"], v["cy"], v["w"], v["h"], v["face_w"], v["face_h"]
-    # Bezel frame.
-    frame = box((w * S, h * S, 0.16), P(cx, cy, z0 + 0.08), M["bezel"], bevel=0.04)
+    k = fw / FACE_W
+    frame = box((w * S, h * S, 0.16), P(cx, cy, z0 + 0.08), M["bezel"], bevel=0.04 * min(1.0, k + 0.2))
     hole = box((fw * S, fh * S, 0.5), P(cx, cy, z0 + 0.1))
     boolean_cut(frame, hole)
-    # Back-lit dial face.
-    bpy.ops.mesh.primitive_plane_add(size=1, location=P(cx, cy, z0 + 0.02))
-    face = bpy.context.active_object
-    face.scale = (fw * S, fh * S, 1)
-    face.data.materials.append(mat_image("VUFace", os.path.join(TEX, "vu_face.png"), emission_strength=0.9, rough=0.6))
-    # Needle (from the face's bottom edge to the scale), angle by the VU law.
-    vu = v["needle_vu"]
-    ang = -46 + 92 * (10 ** (vu / 20) / 10 ** (3 / 20))
-    pivot = P(cx, cy + fh / 2 + 40, z0 + 0.06)
-    d = Vector((math.sin(math.radians(ang)), math.cos(math.radians(ang)), 0))
-    r0 = (40 + 2) / math.cos(math.radians(ang)) * S
-    r1 = (fh + 4) * S
-    mid = pivot + d * ((r0 + r1) / 2)
-    box((0.012, r1 - r0, 0.006), mid, M["needle"], rot=(0, 0, -math.radians(ang)))
-    # Glass.
-    bpy.ops.mesh.primitive_plane_add(size=1, location=P(cx, cy, z0 + 0.12))
-    g = bpy.context.active_object
-    g.scale = (fw * S, fh * S, 1)
-    g.data.materials.append(M["glass"])
-    # Zero-adjust screw under the window.
-    cyl(0.05, 0.02, P(cx, cy + h / 2 - 9, z0 + 0.17), M["steel"], 32, bevel=0.005)
+    face = mat_image(f"Face_{v['face']}", os.path.join(TEX, f"face_{v['face']}.png"), emission_strength=0.9, rough=0.6)
+    plane(fw * S, fh * S, P(cx, cy, z0 + 0.02), face)
+    # Needle: from the face's bottom edge to the scale; the pivot sits below the window.
+    ang = deflection(v["face"], v["needle"])
+    pivot = P(cx, cy + fh / 2 + 40 * k, z0 + 0.06)
+    d = index_dir(ang)
+    r0 = (40 * k + 2) / math.cos(math.radians(ang)) * S
+    r1 = (FACE_H + 4) * k * S
+    box((0.012, r1 - r0, 0.006), pivot + d * ((r0 + r1) / 2), M["needle"], rot=(0, 0, -math.radians(ang)))
+    plane(fw * S, fh * S, P(cx, cy, z0 + 0.12), M["glass"])
+    cyl(0.05 * max(0.7, k), 0.02, P(cx, cy + h / 2 - 9 * max(0.7, k), z0 + 0.17), M["steel"], 32, bevel=0.005)
 
 
-def faceplate():
-    ear = LAY["panel"]["ear"]
-    plate = box((PW * S, PH * S, 0.12), P(PW / 2, PH / 2, -0.06), M["panel"], bevel=0.02)
-    for x, y in LAY["slots"]:
+def faceplate(num, u):
+    w, h = u["panel"]["w"], u["panel"]["h"]
+    ear = u["panel"]["ear"]
+    plate = box((w * S, h * S, 0.12), P(w / 2, h / 2, -0.06), M["panel"], bevel=0.02)
+    for x, y in u["slots"]:
         cut = cyl(0.11, 0.6, P(x, y, 0), verts=48)
         cut.scale = (1.0, 1.6, 1)
         boolean_cut(plate, cut)
-    # Ear seams (slightly darker grooves separating the ears).
-    for x in (ear, PW - ear):
-        box((0.02, PH * S, 0.01), P(x, PH / 2, 0.002), M["recess"])
-    # Printed legends.
-    bpy.ops.mesh.primitive_plane_add(size=1, location=P(PW / 2, PH / 2, 0.003))
-    d = bpy.context.active_object
-    d.scale = (PW * S, PH * S, 1)
-    d.data.materials.append(mat_image("Decal", os.path.join(TEX, "panel_decal.png"), rough=0.55, decal=True))
-    for x, y in LAY["screws"]:
+    for x in (ear, w - ear):
+        box((0.02, h * S, 0.01), P(x, h / 2, 0.002), M["recess"])
+    plane(w * S, h * S, P(w / 2, h / 2, 0.003),
+          mat_image(f"Decal{num}", os.path.join(TEX, f"unit{num}_decal.png"), rough=0.55, decal=True))
+    for x, y in u["screws"]:
         screw(x, y, 0.0)
 
 
-def build_unit01():
-    faceplate()
-    vu_meter(0.0)
-    for k in LAY["knobs_big"]:
+def build_unit(num, origin=(0.0, 0.0, 0.0)):
+    u = UNITS[num]
+    set_frame(u["panel"]["w"], u["panel"]["h"], origin)
+    faceplate(num, u)
+    for v in u["vus"]:
+        vu_meter(v, 0.0)
+    for k in u["knobs_big"]:
         a = -SWEEP + (k["value"] - k["min"]) / (k["max"] - k["min"]) * 2 * SWEEP
         knob_machined(k["cx"], k["cy"], k["r"], a, 0.0)
-    for k in LAY["knobs_step"]:
+    for k in u["knobs_step"]:
         n = len(k["positions"])
         a = -k["spread"] + 2 * k["spread"] * k["value"] / (n - 1)
         knob_chicken(k["cx"], k["cy"], k["r"], a, 0.0)
-    for t in LAY["toggles"]:
+    for k in u["knobs_trim"]:
+        a = -SWEEP + (k["value"] - k["min"]) / (k["max"] - k["min"]) * 2 * SWEEP
+        knob_trim(k["cx"], k["cy"], k["r"], a, 0.0)
+    for t in u["toggles"]:
         toggle(t["cx"], t["cy"], t["on"], t.get("horizontal", False), 0.0)
-    for b in LAY["buttons"]:
+    for b in u["buttons"]:
         push_button(b["cx"], b["cy"], b["w"], b["h"], b["color"], b["lit"], 0.0)
-    j = LAY["jewel"]
+    for l in u["lamps"]:
+        pilot_lamp(l["cx"], l["cy"], l["color"], l["lit"], 0.0)
+    for L in u["ladders"]:
+        ladder(L, 0.0)
+    for d in u["displays"]:
+        seg_display(num, d, 0.0)
+    j = u["jewel"]
     jewel(j["cx"], j["cy"], 0.0)
-    L = LAY["links"]
+    L = u["links"]
     for i, on in enumerate(L["lit"]):
         led(L["x"] + i * L["dx"], L["y"], 0.0, on)
 
 
 # ---- Cameras -------------------------------------------------------------------------
-def cam_front(sc, scale):
+def cam_front(sc, w, h, scale):
     cd = bpy.data.cameras.new("C")
     cd.type = "ORTHO"
-    cd.ortho_scale = PW * S
+    cd.ortho_scale = max(w, h) * S
     c = bpy.data.objects.new("C", cd)
     c.location = (0, 0, 20)
     link(c)
     sc.camera = c
-    sc.render.resolution_x = int(PW * scale)
-    sc.render.resolution_y = int(PH * scale)
+    sc.render.resolution_x = int(w * scale)
+    sc.render.resolution_y = int(h * scale)
     sc.render.film_transparent = True
 
 
-def cam_persp(sc, loc, target, lens, w, h, focus=None, fstop=2.8):
+def cam_persp(sc, loc, target, lens, w, h, focus=None, fstop=2.8, up=None):
     cd = bpy.data.cameras.new("C")
     cd.lens = lens
     if focus is not None:
@@ -522,7 +606,15 @@ def cam_persp(sc, loc, target, lens, w, h, focus=None, fstop=2.8):
     c.location = loc
     link(c)
     d = Vector(target) - Vector(loc)
-    c.rotation_euler = d.to_track_quat("-Z", "Y").to_euler()
+    if up is None:
+        c.rotation_euler = d.to_track_quat("-Z", "Y").to_euler()   # Camera up = world +Z.
+    else:
+        # Explicit world up vector (the rack stands in the XY plane, up = +Y).
+        from mathutils import Matrix
+        f = d.normalized()
+        right = f.cross(Vector(up)).normalized()
+        cam_up = right.cross(f)
+        c.rotation_euler = Matrix((right, cam_up, -f)).transposed().to_euler()
     sc.camera = c
     sc.render.resolution_x = w
     sc.render.resolution_y = h
@@ -544,14 +636,15 @@ def render(sc, name):
     print("[v2] wrote", sc.render.filepath)
 
 
-def shot_front():
-    sc = reset(64 if PREVIEW else 384)
+# ---- Shots ---------------------------------------------------------------------------
+def shot_front(num):
+    sc = reset(64 if PREVIEW else 256)
     world(sc, strength=0.8)
     studio_lights()
     materials()
-    build_unit01()
-    cam_front(sc, 1 if PREVIEW else 2)
-    render(sc, "unit01_front.png")
+    build_unit(num)
+    cam_front(sc, PW, PH, 1 if PREVIEW else 2)
+    render(sc, f"unit{num}_front.png")
 
 
 def shot_hero():
@@ -559,27 +652,52 @@ def shot_hero():
     world(sc, top="#2A2E36", bottom="#050506", strength=0.55)
     studio_lights()
     materials()
-    build_unit01()
+    build_unit("01")
     # Dark stage behind the unit so the warm VU glow carries the frame.
     bpy.ops.mesh.primitive_plane_add(size=60, location=(0, 0, -0.4))
     bpy.context.active_object.data.materials.append(mat_principled("Stage", "#0B0C0E", rough=0.55))
     target = P(PW / 2 - 20, PH / 2 + 10, 0.0)
     loc = Vector((-5.8, -12.4, 9.2))
-    focus_pt = P(LAY["vu"]["cx"], LAY["vu"]["cy"] + 60, 0.1)
+    v = UNITS["01"]["vus"][0]
+    focus_pt = P(v["cx"], v["cy"] + 60, 0.1)
     cam_persp(sc, loc, target, 50, 1280 if PREVIEW else 1920, 720 if PREVIEW else 1080,
               focus=(loc - focus_pt).length, fstop=4.5)
     render(sc, "unit01_hero.png")
 
 
+def shot_rack():
+    """All five units stacked like a rack, shot from the front-left. 4:5 portrait for SNS."""
+    sc = reset(48 if PREVIEW else 192)
+    world(sc, top="#22262D", bottom="#040405", strength=0.5)
+    gap = 3                                  # px between units.
+    order = ["01", "02", "03", "04", "05"]
+    total = sum(UNITS[n]["panel"]["h"] for n in order) + gap * (len(order) - 1)
+    studio_lights(k=2.6, centre=(0.0, 0.0, 0.0))
+    materials()
+    top = total / 2 * S
+    for n in order:
+        h = UNITS[n]["panel"]["h"]
+        cy = top - h / 2 * S
+        build_unit(n, (0.0, cy, 0.0))
+        top -= (h + gap) * S
+    # Rack body behind the faceplates.
+    box((11.4, total * S + 0.4, 1.2), (0, 0, -0.75), M["rack"], bevel=0.04)
+    bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, -1.5))
+    bpy.context.active_object.data.materials.append(mat_principled("Wall", "#0A0B0D", rough=0.7))
+    loc = Vector((-17.0, -4.4, 38.5))
+    target = Vector((0.6, -0.6, 0.0))
+    cam_persp(sc, loc, target, 50, 640 if PREVIEW else 1280, 800 if PREVIEW else 1600,
+              focus=(loc - Vector((0.0, 2.0, 0.2))).length, fstop=8.0, up=(0.0, 1.0, 0.0))
+    render(sc, "rack_hero.png")
+
+
 def shot_knobs():
-    global PW, PH
     sc = reset(64 if PREVIEW else 320)
     world(sc, strength=0.7)
     studio_lights()
     materials()
-    PW, PH = 1100, 380
-    plate = box((PW * S, PH * S, 0.12), P(PW / 2, PH / 2, -0.06), M["panel"], bevel=0.02)
-    _ = plate
+    set_frame(1100, 380)
+    box((PW * S, PH * S, 0.12), P(PW / 2, PH / 2, -0.06), M["panel"], bevel=0.02)
     knob_machined(170, 190, 60, 40, 0.0)
     knob_chicken(430, 190, 46, -30, 0.0)
     knob_fluted(690, 190, 48, 20, 0.0)
@@ -592,4 +710,14 @@ def shot_knobs():
 
 
 if __name__ == "__main__":
-    {"front": shot_front, "hero": shot_hero, "knob": shot_knobs}[SHOT]()
+    if SHOT == "front":
+        for n in (POS or ["01"]):
+            shot_front(n)
+    elif SHOT == "hero":
+        shot_hero()
+    elif SHOT == "rack":
+        shot_rack()
+    elif SHOT == "knob":
+        shot_knobs()
+    else:
+        raise SystemExit(f"unknown shot {SHOT}")

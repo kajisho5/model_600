@@ -1,219 +1,1163 @@
 {
-  "panel": {
-    "w": 1100,
-    "h": 480,
-    "ear": 40
+  "face": {
+    "w": 284,
+    "h": 148
   },
-  "screws": [
-    [
-      20,
-      64
-    ],
-    [
-      20,
-      416
-    ],
-    [
-      1080,
-      64
-    ],
-    [
-      1080,
-      416
-    ]
-  ],
-  "slots": [
-    [
-      20,
-      64
-    ],
-    [
-      20,
-      416
-    ],
-    [
-      1080,
-      64
-    ],
-    [
-      1080,
-      416
-    ]
-  ],
-  "vu": {
-    "cx": 550,
-    "cy": 172,
-    "w": 320,
-    "h": 184,
-    "face_w": 284,
-    "face_h": 148,
-    "needle_vu": -1.0
-  },
-  "knobs_big": [
-    {
-      "id": "input",
-      "cx": 168,
-      "cy": 318,
-      "r": 60,
-      "label": "INPUT GAIN",
-      "unit": "dB",
-      "min": -18,
-      "max": 24,
-      "value": 3.5,
-      "marks": [
-        -18,
-        -12,
-        -6,
-        0,
-        6,
-        12,
-        18,
-        24
-      ]
-    },
-    {
-      "id": "output",
-      "cx": 940,
-      "cy": 318,
-      "r": 60,
-      "label": "OUTPUT TRIM",
-      "unit": "dB",
-      "min": -24,
-      "max": 24,
-      "value": 0.0,
-      "marks": [
-        -24,
-        -18,
-        -12,
-        -6,
-        0,
-        6,
-        12,
-        18,
-        24
-      ]
-    }
-  ],
-  "knobs_step": [
-    {
-      "id": "character",
-      "cx": 330,
-      "cy": 352,
-      "r": 28,
-      "label": "CHARACTER",
-      "positions": [
-        "SOFT",
-        "BCAST",
-        "LOUD"
+  "units": {
+    "01": {
+      "number": "01",
+      "name": "VOCAL MASTER",
+      "tagline": "BROADCAST LEVELING AMPLIFIER",
+      "color": "#F29A1E",
+      "pro": false,
+      "panel": {
+        "w": 1100,
+        "h": 480,
+        "ear": 40
+      },
+      "screws": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
       ],
-      "spread": 55,
-      "value": 1
-    },
-    {
-      "id": "space",
-      "cx": 758,
-      "cy": 352,
-      "r": 28,
-      "label": "SPACE FX",
-      "positions": [
-        "DRY",
-        "KARAOKE",
-        "BATH",
-        "HALL",
-        "CAVE",
-        "RADIO"
+      "slots": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
       ],
-      "spread": 120,
-      "value": 0
+      "jewel": {
+        "cx": 1002,
+        "cy": 104,
+        "label": "POWER"
+      },
+      "links": {
+        "x": 806,
+        "y": 168,
+        "dx": 38,
+        "lit": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "vus": [
+        {
+          "cx": 550,
+          "cy": 172,
+          "w": 320,
+          "h": 184,
+          "face_w": 284,
+          "face_h": 148,
+          "face": "vu",
+          "needle": -1.0,
+          "caption": "OUTPUT LEVEL"
+        }
+      ],
+      "knobs_big": [
+        {
+          "id": "input",
+          "cx": 168,
+          "cy": 318,
+          "r": 60,
+          "label": "INPUT GAIN",
+          "unit": "dB",
+          "min": -18,
+          "max": 24,
+          "marks": [
+            -18,
+            -12,
+            -6,
+            0,
+            6,
+            12,
+            18,
+            24
+          ],
+          "tick": 3,
+          "value": 3.5,
+          "label_y": null
+        },
+        {
+          "id": "output",
+          "cx": 940,
+          "cy": 318,
+          "r": 60,
+          "label": "OUTPUT TRIM",
+          "unit": "dB",
+          "min": -24,
+          "max": 24,
+          "marks": [
+            -24,
+            -18,
+            -12,
+            -6,
+            0,
+            6,
+            12,
+            18,
+            24
+          ],
+          "tick": 3,
+          "value": 0.0,
+          "label_y": null
+        }
+      ],
+      "knobs_step": [
+        {
+          "id": "character",
+          "cx": 330,
+          "cy": 352,
+          "r": 28,
+          "label": "CHARACTER",
+          "positions": [
+            "SOFT",
+            "BCAST",
+            "LOUD"
+          ],
+          "spread": 55,
+          "value": 1
+        },
+        {
+          "id": "space",
+          "cx": 758,
+          "cy": 352,
+          "r": 28,
+          "label": "SPACE FX",
+          "positions": [
+            "DRY",
+            "KARAOKE",
+            "BATH",
+            "HALL",
+            "CAVE",
+            "RADIO"
+          ],
+          "spread": 120,
+          "value": 0
+        }
+      ],
+      "knobs_trim": [],
+      "toggles": [
+        {
+          "id": "meter",
+          "cx": 550,
+          "cy": 300,
+          "label_l": "OUT",
+          "label_r": "GR",
+          "title": "METER",
+          "horizontal": true,
+          "on": false
+        },
+        {
+          "id": "mono",
+          "cx": 846,
+          "cy": 104,
+          "label_up": "AUTO",
+          "label_dn": "OFF",
+          "title": "MONO",
+          "on": true
+        },
+        {
+          "id": "latency",
+          "cx": 924,
+          "cy": 104,
+          "label_up": "1.5ms",
+          "label_dn": "0ms",
+          "title": "LOOK-AHEAD",
+          "on": true
+        }
+      ],
+      "buttons": [
+        {
+          "id": "cal",
+          "cx": 433,
+          "cy": 388,
+          "w": 54,
+          "h": 34,
+          "label": "CAL 10s",
+          "color": "amber",
+          "lit": false
+        },
+        {
+          "id": "ab",
+          "cx": 511,
+          "cy": 388,
+          "w": 54,
+          "h": 34,
+          "label": "A/B",
+          "color": "amber",
+          "lit": true
+        },
+        {
+          "id": "bleep",
+          "cx": 589,
+          "cy": 388,
+          "w": 54,
+          "h": 34,
+          "label": "BLEEP",
+          "color": "red",
+          "lit": false
+        },
+        {
+          "id": "cough",
+          "cx": 667,
+          "cy": 388,
+          "w": 54,
+          "h": 34,
+          "label": "COUGH",
+          "color": "amber",
+          "lit": false
+        }
+      ],
+      "lamps": [],
+      "ladders": [],
+      "displays": [],
+      "flow": null,
+      "target": null
+    },
+    "02": {
+      "number": "02",
+      "name": "COLLAB RIDER",
+      "tagline": "GUEST VOICE AUTO-RIDER",
+      "color": "#2BA6BC",
+      "pro": false,
+      "panel": {
+        "w": 1100,
+        "h": 480,
+        "ear": 40
+      },
+      "screws": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
+      ],
+      "slots": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
+      ],
+      "jewel": {
+        "cx": 1002,
+        "cy": 104,
+        "label": "POWER"
+      },
+      "links": {
+        "x": 900,
+        "y": 178,
+        "dx": 30,
+        "lit": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "vus": [
+        {
+          "cx": 500,
+          "cy": 168,
+          "w": 220,
+          "h": 152,
+          "face_w": 184,
+          "face_h": 96,
+          "face": "vu",
+          "needle": -5.0,
+          "caption": "GUEST LEVEL"
+        },
+        {
+          "cx": 736,
+          "cy": 168,
+          "w": 220,
+          "h": 152,
+          "face_w": 184,
+          "face_h": 96,
+          "face": "ride",
+          "needle": -3.5,
+          "caption": "AUTO RIDE"
+        }
+      ],
+      "knobs_big": [
+        {
+          "id": "target",
+          "cx": 168,
+          "cy": 318,
+          "r": 60,
+          "label": "TARGET LOUDNESS",
+          "unit": "LUFS",
+          "min": -24,
+          "max": -8,
+          "marks": [
+            -24,
+            -20,
+            -16,
+            -12,
+            -8
+          ],
+          "tick": 2,
+          "value": -14.5,
+          "label_y": null
+        },
+        {
+          "id": "duck",
+          "cx": 380,
+          "cy": 318,
+          "r": 46,
+          "label": "DUCK WHEN I TALK",
+          "unit": "dB",
+          "min": -12,
+          "max": 0,
+          "marks": [
+            -12,
+            -9,
+            -6,
+            -3,
+            0
+          ],
+          "tick": 1.5,
+          "value": -3.5,
+          "label_y": 430
+        },
+        {
+          "id": "output",
+          "cx": 940,
+          "cy": 318,
+          "r": 60,
+          "label": "OUTPUT TRIM",
+          "unit": "dB",
+          "min": -24,
+          "max": 24,
+          "marks": [
+            -24,
+            -18,
+            -12,
+            -6,
+            0,
+            6,
+            12,
+            18,
+            24
+          ],
+          "tick": 3,
+          "value": 0.0,
+          "label_y": null
+        }
+      ],
+      "knobs_step": [],
+      "knobs_trim": [],
+      "toggles": [],
+      "buttons": [],
+      "lamps": [
+        {
+          "cx": 592,
+          "cy": 374,
+          "color": "amber",
+          "lit": false,
+          "label": "RIDING"
+        },
+        {
+          "cx": 686,
+          "cy": 374,
+          "color": "green",
+          "lit": true,
+          "label": "YOU TALK"
+        }
+      ],
+      "ladders": [],
+      "displays": [],
+      "flow": {
+        "y": 316,
+        "nodes": [
+          [
+            "GUEST",
+            498
+          ],
+          [
+            "RIDE",
+            592
+          ],
+          [
+            "DUCK",
+            686
+          ],
+          [
+            "OUT",
+            774
+          ]
+        ]
+      },
+      "target": null
+    },
+    "03": {
+      "number": "03",
+      "name": "GAME IMPACT",
+      "tagline": "GAME AUDIO IMPACT LIMITER",
+      "color": "#E2472C",
+      "pro": false,
+      "panel": {
+        "w": 1100,
+        "h": 480,
+        "ear": 40
+      },
+      "screws": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
+      ],
+      "slots": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
+      ],
+      "jewel": {
+        "cx": 1002,
+        "cy": 104,
+        "label": "POWER"
+      },
+      "links": {
+        "x": 806,
+        "y": 168,
+        "dx": 38,
+        "lit": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "vus": [
+        {
+          "cx": 550,
+          "cy": 172,
+          "w": 320,
+          "h": 184,
+          "face_w": 284,
+          "face_h": 148,
+          "face": "vu",
+          "needle": 0.6,
+          "caption": "GAME OUTPUT"
+        }
+      ],
+      "knobs_big": [
+        {
+          "id": "ceiling",
+          "cx": 168,
+          "cy": 318,
+          "r": 60,
+          "label": "IMPACT CEILING",
+          "unit": "dB",
+          "min": -12,
+          "max": 0,
+          "marks": [
+            -12,
+            -9,
+            -6,
+            -3,
+            0
+          ],
+          "tick": 1.5,
+          "value": -6.0,
+          "label_y": null
+        },
+        {
+          "id": "scoop",
+          "cx": 380,
+          "cy": 318,
+          "r": 46,
+          "label": "VOICE SCOOP",
+          "unit": "dB",
+          "min": -12,
+          "max": 0,
+          "marks": [
+            -12,
+            -9,
+            -6,
+            -3,
+            0
+          ],
+          "tick": 1.5,
+          "value": -5.0,
+          "label_y": 430
+        },
+        {
+          "id": "output",
+          "cx": 940,
+          "cy": 318,
+          "r": 60,
+          "label": "OUTPUT TRIM",
+          "unit": "dB",
+          "min": -24,
+          "max": 24,
+          "marks": [
+            -24,
+            -18,
+            -12,
+            -6,
+            0,
+            6,
+            12,
+            18,
+            24
+          ],
+          "tick": 3,
+          "value": 0.0,
+          "label_y": null
+        }
+      ],
+      "knobs_step": [],
+      "knobs_trim": [],
+      "toggles": [],
+      "buttons": [],
+      "lamps": [
+        {
+          "cx": 540,
+          "cy": 392,
+          "color": "red",
+          "lit": true,
+          "label": "LIMIT"
+        },
+        {
+          "cx": 660,
+          "cy": 392,
+          "color": "green",
+          "lit": true,
+          "label": "SCOOPING"
+        }
+      ],
+      "ladders": [
+        {
+          "cx": 600,
+          "cy": 318,
+          "n": 16,
+          "lit": 6,
+          "label": "LIMITING  dB",
+          "scale": [
+            [
+              "0",
+              0
+            ],
+            [
+              "-3",
+              4
+            ],
+            [
+              "-6",
+              8
+            ],
+            [
+              "-9",
+              12
+            ],
+            [
+              "-12",
+              15
+            ]
+          ],
+          "colors": [
+            [
+              0.0,
+              "amber"
+            ],
+            [
+              0.5,
+              "red"
+            ]
+          ]
+        }
+      ],
+      "displays": [],
+      "flow": null,
+      "target": null
+    },
+    "04": {
+      "number": "04",
+      "name": "BGM POCKET",
+      "tagline": "MUSIC BED AUTO-DUCKER",
+      "color": "#57B65F",
+      "pro": false,
+      "panel": {
+        "w": 1100,
+        "h": 480,
+        "ear": 40
+      },
+      "screws": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
+      ],
+      "slots": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          416
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          416
+        ]
+      ],
+      "jewel": {
+        "cx": 1002,
+        "cy": 104,
+        "label": "POWER"
+      },
+      "links": {
+        "x": 806,
+        "y": 168,
+        "dx": 38,
+        "lit": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "vus": [
+        {
+          "cx": 550,
+          "cy": 172,
+          "w": 320,
+          "h": 184,
+          "face_w": 284,
+          "face_h": 148,
+          "face": "vu",
+          "needle": -7.0,
+          "caption": "BGM LEVEL"
+        }
+      ],
+      "knobs_big": [
+        {
+          "id": "pocket",
+          "cx": 168,
+          "cy": 318,
+          "r": 60,
+          "label": "POCKET DEPTH",
+          "unit": "dB",
+          "min": -12,
+          "max": 0,
+          "marks": [
+            -12,
+            -9,
+            -6,
+            -3,
+            0
+          ],
+          "tick": 1.5,
+          "value": -8.5,
+          "label_y": null
+        },
+        {
+          "id": "output",
+          "cx": 940,
+          "cy": 318,
+          "r": 60,
+          "label": "OUTPUT TRIM",
+          "unit": "dB",
+          "min": -24,
+          "max": 24,
+          "marks": [
+            -24,
+            -18,
+            -12,
+            -6,
+            0,
+            6,
+            12,
+            18,
+            24
+          ],
+          "tick": 3,
+          "value": 0.0,
+          "label_y": null
+        }
+      ],
+      "knobs_step": [],
+      "knobs_trim": [],
+      "toggles": [
+        {
+          "id": "safe",
+          "cx": 318,
+          "cy": 330,
+          "label_up": "ON",
+          "label_dn": "OFF",
+          "title": "SING SAFE",
+          "on": false
+        },
+        {
+          "id": "swell",
+          "cx": 398,
+          "cy": 330,
+          "label_up": "ON",
+          "label_dn": "OFF",
+          "title": "AFK SWELL",
+          "on": true
+        }
+      ],
+      "buttons": [],
+      "lamps": [
+        {
+          "cx": 520,
+          "cy": 392,
+          "color": "amber",
+          "lit": true,
+          "label": "VOICE DUCK"
+        },
+        {
+          "cx": 600,
+          "cy": 392,
+          "color": "green",
+          "lit": false,
+          "label": "AFK SWELL"
+        },
+        {
+          "cx": 680,
+          "cy": 392,
+          "color": "amber",
+          "lit": false,
+          "label": "COUGH LIFT"
+        }
+      ],
+      "ladders": [
+        {
+          "cx": 600,
+          "cy": 318,
+          "n": 16,
+          "lit": 11,
+          "label": "POCKET  dB",
+          "scale": [
+            [
+              "0",
+              0
+            ],
+            [
+              "-3",
+              4
+            ],
+            [
+              "-6",
+              8
+            ],
+            [
+              "-9",
+              12
+            ],
+            [
+              "-12",
+              15
+            ]
+          ],
+          "colors": [
+            [
+              0.0,
+              "green"
+            ],
+            [
+              0.6,
+              "amber"
+            ]
+          ]
+        }
+      ],
+      "displays": [],
+      "flow": null,
+      "target": null
+    },
+    "05": {
+      "number": "05",
+      "name": "STREAM DIRECTOR",
+      "tagline": "MASTER LOUDNESS DIRECTOR",
+      "color": "#D6AE55",
+      "pro": true,
+      "panel": {
+        "w": 1100,
+        "h": 630,
+        "ear": 40
+      },
+      "screws": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          566
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          566
+        ]
+      ],
+      "slots": [
+        [
+          20,
+          64
+        ],
+        [
+          20,
+          566
+        ],
+        [
+          1080,
+          64
+        ],
+        [
+          1080,
+          566
+        ]
+      ],
+      "jewel": {
+        "cx": 1002,
+        "cy": 104,
+        "label": "POWER"
+      },
+      "links": {
+        "x": 900,
+        "y": 172,
+        "dx": 30,
+        "lit": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      },
+      "vus": [
+        {
+          "cx": 178,
+          "cy": 292,
+          "w": 216,
+          "h": 148,
+          "face_w": 180,
+          "face_h": 94,
+          "face": "vu",
+          "needle": -2.0,
+          "caption": "",
+          "chan": {
+            "number": "01",
+            "name": "VOCAL"
+          }
+        },
+        {
+          "cx": 426,
+          "cy": 292,
+          "w": 216,
+          "h": 148,
+          "face_w": 180,
+          "face_h": 94,
+          "face": "vu",
+          "needle": -6.0,
+          "caption": "",
+          "chan": {
+            "number": "02",
+            "name": "COLLAB"
+          }
+        },
+        {
+          "cx": 674,
+          "cy": 292,
+          "w": 216,
+          "h": 148,
+          "face_w": 180,
+          "face_h": 94,
+          "face": "vu",
+          "needle": -4.0,
+          "caption": "",
+          "chan": {
+            "number": "03",
+            "name": "GAME"
+          }
+        },
+        {
+          "cx": 922,
+          "cy": 292,
+          "w": 216,
+          "h": 148,
+          "face_w": 180,
+          "face_h": 94,
+          "face": "vu",
+          "needle": -11.0,
+          "caption": "",
+          "chan": {
+            "number": "04",
+            "name": "BGM"
+          }
+        },
+        {
+          "cx": 410,
+          "cy": 512,
+          "w": 168,
+          "h": 104,
+          "face_w": 132,
+          "face_h": 69,
+          "face": "phase",
+          "needle": 0.62,
+          "caption": "PHASE"
+        }
+      ],
+      "knobs_big": [],
+      "knobs_step": [
+        {
+          "id": "scene",
+          "cx": 600,
+          "cy": 512,
+          "r": 26,
+          "label": "SCENE",
+          "positions": [
+            "FPS",
+            "TALK",
+            "SING",
+            "ASMR"
+          ],
+          "spread": 75,
+          "value": 1
+        }
+      ],
+      "knobs_trim": [
+        {
+          "cx": 248,
+          "cy": 404,
+          "r": 17,
+          "label": "TRIM",
+          "value": 0.0,
+          "min": -12,
+          "max": 12
+        },
+        {
+          "cx": 496,
+          "cy": 404,
+          "r": 17,
+          "label": "TRIM",
+          "value": 0.0,
+          "min": -12,
+          "max": 12
+        },
+        {
+          "cx": 744,
+          "cy": 404,
+          "r": 17,
+          "label": "TRIM",
+          "value": 0.0,
+          "min": -12,
+          "max": 12
+        },
+        {
+          "cx": 992,
+          "cy": 404,
+          "r": 17,
+          "label": "TRIM",
+          "value": 0.0,
+          "min": -12,
+          "max": 12
+        }
+      ],
+      "toggles": [],
+      "buttons": [
+        {
+          "id": "mono",
+          "cx": 728,
+          "cy": 506,
+          "w": 52,
+          "h": 32,
+          "label": "MONO",
+          "color": "amber",
+          "lit": false
+        },
+        {
+          "id": "reset",
+          "cx": 798,
+          "cy": 506,
+          "w": 52,
+          "h": 32,
+          "label": "RESET",
+          "color": "amber",
+          "lit": false
+        },
+        {
+          "id": "chapter",
+          "cx": 868,
+          "cy": 506,
+          "w": 52,
+          "h": 32,
+          "label": "CHAPTER",
+          "color": "amber",
+          "lit": true
+        },
+        {
+          "id": "report",
+          "cx": 938,
+          "cy": 506,
+          "w": 52,
+          "h": 32,
+          "label": "REPORT",
+          "color": "amber",
+          "lit": false
+        }
+      ],
+      "lamps": [
+        {
+          "cx": 120,
+          "cy": 508,
+          "color": "amber",
+          "lit": false,
+          "label": "LOW"
+        },
+        {
+          "cx": 186,
+          "cy": 508,
+          "color": "green",
+          "lit": true,
+          "label": "IN RANGE"
+        },
+        {
+          "cx": 252,
+          "cy": 508,
+          "color": "red",
+          "lit": false,
+          "label": "HIGH"
+        }
+      ],
+      "ladders": [],
+      "displays": [
+        {
+          "id": "m",
+          "cx": 494,
+          "cy": 96,
+          "w": 112,
+          "h": 56,
+          "text": "-13.8",
+          "label": "MOMENTARY"
+        },
+        {
+          "id": "s",
+          "cx": 628,
+          "cy": 96,
+          "w": 112,
+          "h": 56,
+          "text": "-14.1",
+          "label": "SHORT-TERM"
+        },
+        {
+          "id": "i",
+          "cx": 782,
+          "cy": 96,
+          "w": 152,
+          "h": 56,
+          "text": "-14.2",
+          "label": "INTEGRATED  LUFS"
+        }
+      ],
+      "flow": null,
+      "target": {
+        "title": "YOUTUBE TARGET  -12 \u00b11.5 LUFS",
+        "x": 96,
+        "y": 470
+      }
     }
-  ],
-  "toggles": [
-    {
-      "id": "meter",
-      "cx": 550,
-      "cy": 300,
-      "label_l": "OUT",
-      "label_r": "GR",
-      "title": "METER",
-      "horizontal": true,
-      "on": false
-    },
-    {
-      "id": "mono",
-      "cx": 846,
-      "cy": 104,
-      "label_up": "AUTO",
-      "label_dn": "OFF",
-      "title": "MONO",
-      "on": true
-    },
-    {
-      "id": "latency",
-      "cx": 924,
-      "cy": 104,
-      "label_up": "1.5ms",
-      "label_dn": "0ms",
-      "title": "LOOK-AHEAD",
-      "on": true
-    }
-  ],
-  "buttons": [
-    {
-      "id": "cal",
-      "cx": 433,
-      "cy": 388,
-      "w": 54,
-      "h": 34,
-      "label": "CAL 10s",
-      "color": "amber",
-      "lit": false
-    },
-    {
-      "id": "ab",
-      "cx": 511,
-      "cy": 388,
-      "w": 54,
-      "h": 34,
-      "label": "A/B",
-      "color": "amber",
-      "lit": true
-    },
-    {
-      "id": "bleep",
-      "cx": 589,
-      "cy": 388,
-      "w": 54,
-      "h": 34,
-      "label": "BLEEP",
-      "color": "red",
-      "lit": false
-    },
-    {
-      "id": "cough",
-      "cx": 667,
-      "cy": 388,
-      "w": 54,
-      "h": 34,
-      "label": "COUGH",
-      "color": "amber",
-      "lit": false
-    }
-  ],
-  "jewel": {
-    "cx": 1002,
-    "cy": 104,
-    "label": "POWER"
-  },
-  "links": {
-    "x": 806,
-    "y": 168,
-    "dx": 38,
-    "lit": [
-      true,
-      true,
-      true,
-      true,
-      true
-    ]
   }
 }
