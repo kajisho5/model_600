@@ -27,10 +27,10 @@ QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 ./build/m600_render_gui_samples docs
 | 08 | ![](08_console_director_en.png) | 同・英語表示（パネルの刻印は共通。説明表示と右クリックメニューが切り替わる） |
 | 09 | ![](09_mini_unit01.png) | コンパクト表示（[01]） |
 | 10 | ![](10_mini_director.png) | コンパクト表示（[05]） |
-| 11 | ![](11_calibration_measuring.png) | 10秒自動測定：測定中 |
-| 12 | ![](12_calibration_success.png) | 測定完了（GAIN つまみの目安位置を表示） |
-| 13 | ![](13_calibration_clip_warning.png) | 入力の歪みを検出 |
-| 14 | ![](14_calibration_no_voice.png) | 声を検出できず |
+| 11 | ![](11_calibration_measuring.png) | 10秒自動測定「INPUT CALIBRATOR」：測定中（読み上げカード、入力ピーク、経過秒数、進み具合） |
+| 12 | ![](12_calibration_success.png) | 測定完了（設定した入力ゲイン、インターフェースの GAIN つまみの目安） |
+| 13 | ![](13_calibration_clip_warning.png) | 入力の歪みを検出（赤ランプ、つまみを下げる案内） |
+| 14 | ![](14_calibration_no_voice.png) | 声を検出できず（アンバーランプ、確認事項） |
 | 15 | ![](15_obs_filter_panel_approx.png) | OBS のフィルタ設定画面（**近似の再現**。実物は OBS が描画） |
 
 ## 注意

@@ -3,6 +3,7 @@ hw/bg_02.png
 hw/bg_03.png
 hw/bg_04.png
 hw/bg_05.png
+hw/bg_cal.png
 hw/cap_amber_off_52x32.png
 hw/cap_amber_off_54x34.png
 hw/cap_amber_off_down_52x32.png
