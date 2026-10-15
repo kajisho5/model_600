@@ -44,6 +44,7 @@ EXPECTED = [
     "src/hw-panel.hpp",
     "src/hw-panel.cpp",
     "resources/hw/hw.json",
+    "resources/macos/Info.plist.in",
     "src/voice-command-win.cpp",
     "src/voice-command-mac.mm",
     "src/audio-filter.cpp",

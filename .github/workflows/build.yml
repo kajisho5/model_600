@@ -116,14 +116,30 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Check binaries
+      - name: Package
         shell: bash
         run: |
+          # Install layout = what the user copies into OBS.
+          cmake --install build --config Release --prefix pkg
+          name="model600-${{ runner.os }}-${{ matrix.edition }}"
+          mkdir -p dist
           if [ "$RUNNER_OS" = "macOS" ]; then
-            lipo -info build/model600.so build/m600_test_dsp
+            bin=pkg/model600.plugin/Contents/MacOS/model600
+            lipo -info "$bin" build/m600_test_dsp
+            file "$bin" | grep -q "bundle" || { echo "not an MH_BUNDLE"; exit 1; }
+            plutil -lint pkg/model600.plugin/Contents/Info.plist
+            plutil -p pkg/model600.plugin/Contents/Info.plist
+            # Ad-hoc signature over the whole bundle (no Developer ID yet).
+            codesign --force --sign - pkg/model600.plugin
+            codesign --verify --strict --verbose=2 pkg/model600.plugin
+            cp install_mac.command pkg/
+            (cd pkg && ditto -c -k --keepParent model600.plugin "../dist/$name.zip" \
+              && zip -q "../dist/$name.zip" install_mac.command)
           else
-            ls -l build/Release/model600.dll
+            ls -l pkg/obs-plugins/64bit/model600.dll
+            (cd pkg && 7z a -tzip "../dist/$name.zip" obs-plugins >/dev/null)
           fi
+          unzip -l "dist/$name.zip"
 
       - name: Render GUI samples
         if: matrix.edition == 'pro'
@@ -147,9 +163,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: model600-${{ runner.os }}-${{ matrix.edition }}
-          path: |
-            build/Release/model600.dll
-            build/model600.so
+          path: dist/*.zip
+          if-no-files-found: error
 
       - name: Upload GUI samples
         if: matrix.edition == 'pro'

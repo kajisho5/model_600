@@ -53,6 +53,13 @@ ctest --test-dir build --output-on-failure
 - **macOS**: build, then double-click `install_mac.command` (clears Gatekeeper
   quarantine and installs the `.plugin`).
 
+CI packages (GitHub Actions artifacts `model600-<OS>-<edition>`):
+
+- `model600-Windows-*.zip`: `obs-plugins/64bit/model600.dll` — extract into the
+  OBS install folder (e.g. `C:\Program Files\obs-studio`).
+- `model600-macOS-*.zip`: `model600.plugin` (Universal2, ad-hoc signed) +
+  `install_mac.command` — extract and double-click the installer.
+
 ### Requirements
 OBS Studio 30+, Qt 6, a C++20 compiler (MSVC `/utf-8 /W4`, Apple Clang
 Universal2, or GCC/Clang on Linux), CMake 3.21+.
@@ -68,4 +75,5 @@ network outage.
 ## 既知の制限 / Known limitations
 
 - 音声コマンド受理時の完了チャイム（モニター専用、-24 dB）は未実装です。OBSフィルタの出力は配信にも乗るため、モニターだけに鳴らすには別のモニター専用ソースが必要になります。
+- macOS の音声ディレクター: 音声認識の許可ダイアログ文言（`NSSpeechRecognitionUsageDescription`）はホストアプリ（OBS.app）の Info.plist から読まれますが、OBS 31.1.1 はこのキーを持っていません。キーが無いアプリで音声認識を要求すると macOS がプロセスを終了させるため、このキーが無い OBS では音声ディレクターを起動せず、OBS ログに警告を出して無効のままにします（他の機能は動作します）。
 - ライセンス・保護・OS設定修復まわりの保留事項は [`docs/DEFERRED_NOTES.md`](docs/DEFERRED_NOTES.md) にまとめています。

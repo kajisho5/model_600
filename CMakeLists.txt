@@ -178,7 +178,18 @@ endif()
 if(APPLE)
     target_link_libraries(model600 PRIVATE
         "-framework Foundation" "-framework Speech" "-framework AVFoundation")
-    set_target_properties(model600 PROPERTIES PREFIX "" SUFFIX ".so")
+    # Loadable bundle, the layout OBS scans in ~/Library/Application Support/obs-studio/plugins:
+    # model600.plugin/Contents/{Info.plist, MacOS/model600}.
+    string(TIMESTAMP M600_YEAR "%Y")
+    set_target_properties(model600 PROPERTIES
+        BUNDLE TRUE
+        BUNDLE_EXTENSION plugin
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/macos/Info.plist.in"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.seventhwell.model600"
+        MACOSX_BUNDLE_BUNDLE_NAME "model600"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_COPYRIGHT "(c) ${M600_YEAR} SEVENTHWELL")
 elseif(WIN32)
     set_target_properties(model600 PROPERTIES PREFIX "" SUFFIX ".dll")
 else()
@@ -190,7 +201,7 @@ if(WIN32)
     # A MODULE library is a LIBRARY artifact on every platform, .dll included.
     install(TARGETS model600 LIBRARY DESTINATION obs-plugins/64bit)
 elseif(APPLE)
-    install(TARGETS model600 LIBRARY DESTINATION "model600.plugin/Contents/MacOS")
+    install(TARGETS model600 LIBRARY DESTINATION .)
 else()
     install(TARGETS model600 LIBRARY DESTINATION lib/obs-plugins)
 endif()
