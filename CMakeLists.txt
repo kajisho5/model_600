@@ -20,11 +20,30 @@ project(model600
 option(MODEL600_PRO_EDITION "Build the Pro edition (UNIT 05 + voice director)" ON)
 option(MODEL600_BUILD_TESTS "Build the headless Layer-1/2 self-tests" OFF)
 option(MODEL600_BUILD_GUI_SAMPLES "Build the GUI sample renderer (dev tool)" OFF)
+option(MODEL600_BUILD_PLUGIN "Build the OBS plugin module (needs the libobs SDK)" ON)
+option(MODEL600_BUILD_PORTABLE_CHECK
+       "Compile every OBS-independent source with warnings as errors (CI on Windows / macOS)" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# MSVC: sources and strings are UTF-8 (Japanese UI text); big objects for the
+# embedded faceplate assets.
+if(MSVC)
+    add_compile_options(/utf-8 /bigobj)
+endif()
+
+# Strict warnings for our own code; third-party headers (Qt, SDKs) are external.
+function(m600_strict_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /WX /permissive- /EHsc /external:anglebrackets /external:W0)
+        target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+endfunction()
 
 if(APPLE)
     # Universal2 fat binary. (Honoured only by the Apple Clang toolchain.)
@@ -41,6 +60,7 @@ endif()
 set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Multimedia)
 
+if(MODEL600_BUILD_PLUGIN)
 # --- libobs + frontend-api ---------------------------------------------------
 # Prefer the upstream CMake package; fall back to a manual search so the build
 # works on distro packages (e.g. Ubuntu libobs-dev) that ship no config file.
@@ -172,6 +192,8 @@ else()
     install(TARGETS model600 LIBRARY DESTINATION lib/obs-plugins)
 endif()
 
+endif() # MODEL600_BUILD_PLUGIN
+
 # --- Optional headless self-tests (Layer 1/2, no OBS/GUI) --------------------
 if(MODEL600_BUILD_TESTS)
     enable_testing()
@@ -187,6 +209,29 @@ if(MODEL600_BUILD_TESTS)
     add_executable(m600_test_voice tests/test_voice.cpp)
     target_include_directories(m600_test_voice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME voice COMMAND m600_test_voice)
+endif()
+
+# --- Optional portable compile check (no OBS SDK needed) ---------------------
+if(MODEL600_BUILD_PORTABLE_CHECK)
+    set(M600_PORTABLE_SOURCES
+        tools/portable_check/portable_check.cpp
+        src/custom-ui-dialog.cpp src/custom-ui-dialog.hpp
+        src/hw-panel.cpp src/hw-panel.hpp
+        src/ui-widgets.cpp src/ui-widgets.hpp
+        src/update-checker.hpp)
+    if(WIN32)
+        list(APPEND M600_PORTABLE_SOURCES src/voice-command-win.cpp)
+    elseif(APPLE)
+        list(APPEND M600_PORTABLE_SOURCES src/voice-command-mac.mm)
+    endif()
+    add_library(m600_portable_check OBJECT ${M600_PORTABLE_SOURCES})
+    target_include_directories(m600_portable_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(m600_portable_check PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Multimedia)
+    if(MODEL600_PRO_EDITION)
+        target_compile_definitions(m600_portable_check PRIVATE MODEL600_PRO_EDITION=1)
+    endif()
+    m600_strict_warnings(m600_portable_check)
 endif()
 
 # --- Optional GUI sample renderer (renders every console screen to PNG) ------

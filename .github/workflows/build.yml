@@ -52,3 +52,67 @@ jobs:
         with:
           name: gui-samples
           path: gui-samples-out/*.png
+
+  # Windows (MSVC) and macOS (Apple Clang, Universal2): every source except the
+  # two OBS adapters, warnings as errors, then the tests and the real GUI.
+  # The OBS adapters need the libobs SDK and are built by the Linux jobs.
+  portable:
+    name: ${{ matrix.os_name }} (${{ matrix.edition }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, os_name: Windows MSVC, edition: pro }
+          - { os: windows-2022, os_name: Windows MSVC, edition: standard }
+          - { os: macos-14, os_name: macOS Universal2, edition: pro }
+          - { os: macos-14, os_name: macOS Universal2, edition: standard }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.6.3'
+          modules: 'qtmultimedia'
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DMODEL600_BUILD_PLUGIN=OFF
+          -DMODEL600_BUILD_PORTABLE_CHECK=ON
+          -DMODEL600_BUILD_TESTS=ON
+          -DMODEL600_BUILD_GUI_SAMPLES=ON
+          -DMODEL600_PRO_EDITION=${{ matrix.edition == 'pro' && 'ON' || 'OFF' }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Check Universal2 slices
+        if: runner.os == 'macOS'
+        run: lipo -info build/m600_test_dsp
+
+      - name: Render GUI samples
+        if: matrix.edition == 'pro'
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_SCALE_FACTOR: '2'
+        run: |
+          if [ -x build/Release/m600_render_gui_samples.exe ]; then
+            ./build/Release/m600_render_gui_samples.exe gui-samples-out
+          else
+            ./build/m600_render_gui_samples gui-samples-out
+          fi
+
+      - name: Upload GUI samples
+        if: matrix.edition == 'pro'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-samples-${{ runner.os }}
+          path: gui-samples-out/*.png
