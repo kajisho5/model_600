@@ -1025,6 +1025,10 @@ def shot_calib():
         hide_from_camera(created(button_cap, b["cx"], b["cy"], b["w"], b["h"], b["color"], False, 0.0))
     cam_front(sc, w, h, 1 if PREVIEW else 2)
     render(sc, "calib_bg.png")
+    # The app uses the same plate (pack_assets.py picks it up from the frames folder).
+    os.makedirs(FRAMES, exist_ok=True)
+    import shutil
+    shutil.copyfile(os.path.join(OUT, "calib_bg.png"), os.path.join(FRAMES, "bg_cal.png"))
 
 
 if __name__ == "__main__":

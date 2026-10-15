@@ -51,6 +51,19 @@ def main():
         manifest["backgrounds"][num] = name
         files.append(name)
 
+    # INPUT CALIBRATOR module (calibrator_mock.py layout, render_hardware.py -- calib plate).
+    with open(os.path.join(HERE, "tex", "calib_layout.json")) as f:
+        manifest["calibrator"] = json.load(f)
+    src = os.path.join(FRAMES, "bg_cal.png")
+    if not os.path.exists(src):
+        sys.exit(f"missing calibrator plate {src}")
+    im = Image.open(src).convert("RGBA")
+    flat = Image.new("RGB", im.size, (0, 0, 0))
+    flat.paste(im, mask=im.split()[3])
+    flat.save(os.path.join(OUT, "bg_cal.png"), optimize=True)
+    manifest["backgrounds"]["cal"] = "bg_cal.png"
+    files.append("bg_cal.png")
+
     for strip in STRIPS:
         spec = sprites[strip]
         n = len(spec["angles"])

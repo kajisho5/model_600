@@ -60,12 +60,14 @@ public:
     const Strip* strip(const QString& name) const;
     QPixmap sprite(const QString& name) const;
     QSizeF sprite_size(const QString& name) const;   // Logical size.
+    QJsonObject calibrator() const { return calibrator_; }   // INPUT CALIBRATOR layout.
     qreal scale() const noexcept { return scale_; }
 private:
     Assets();
     bool ok_ = false;
     qreal scale_ = 2.0;
     QJsonObject units_;
+    QJsonObject calibrator_;
     QHash<QString, QString> bg_files_;
     QHash<QString, Strip> strips_;
     QHash<QString, QSizeF> sizes_;
@@ -87,6 +89,15 @@ struct Disp {
     static inline const QColor red_off{0x26, 0x0C, 0x0A};
     static inline const QColor ink{0xE9, 0xE3, 0xD3};
     static inline const QColor ink_dim{0xA9, 0xA4, 0x97};
+};
+
+// Peak ballistics like OBS's mixer: instant attack, 20 dB/s fall; `hold` keeps
+// the highest value for 1.5 s so a number drawn from it stays readable.
+struct PeakHold {
+    float bar = -120.0f, hold = -120.0f;
+    qint64 hold_ms = 0;
+    void feed(float db, qint64 now_ms, float dt_s);
+    void reset() { bar = hold = -120.0f; hold_ms = 0; }
 };
 
 // Draw a 7-segment string (with "." folded into the previous cell) into a cell row.
@@ -234,11 +245,27 @@ class Lamp : public QWidget {
 public:
     Lamp(QPointF centre, const QString& color, QWidget* parent);
     void set_lit(bool on) { if (lit_ != on) { lit_ = on; update(); } }
+    void set_color(const QString& color) { if (color_ != color) { color_ = color; update(); } }
 protected:
     void paintEvent(QPaintEvent*) override;
 private:
     QString color_;
     bool lit_ = false;
+};
+
+// -----------------------------------------------------------------------------
+//  Single LED (calibrator step indicator): on = green, idle = dim amber, off.
+// -----------------------------------------------------------------------------
+class Led : public QWidget {
+    Q_OBJECT
+public:
+    enum class State { Off, Idle, On };
+    Led(QPointF centre, QWidget* parent);
+    void set_state(State s) { if (s != state_) { state_ = s; update(); } }
+protected:
+    void paintEvent(QPaintEvent*) override;
+private:
+    State state_ = State::Off;
 };
 
 // -----------------------------------------------------------------------------
@@ -310,6 +337,7 @@ public:
     // `zones`: (start fraction, "green"|"amber"|"red") pairs, as in the layout.
     Ladder(QPointF centre, int n, const QVector<QPair<double, QString>>& zones, QWidget* parent);
     void set_lit(int count) { count = qBound(0, count, n_); if (count != lit_) { lit_ = count; update(); } }
+    void set_zones(const QVector<QPair<double, QString>>& zones) { zones_ = zones; update(); }
     int segments() const noexcept { return n_; }
 protected:
     void paintEvent(QPaintEvent*) override;

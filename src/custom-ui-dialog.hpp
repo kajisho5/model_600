@@ -13,6 +13,7 @@
 #define SEVENTHWELL_MODEL600_CUSTOM_UI_DIALOG_HPP
 
 #include "dsp-core.hpp"
+#include "hw-panel.hpp"
 #include "shared-state.hpp"
 
 #include <array>
@@ -22,31 +23,18 @@
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QHash>
+#include <QJsonObject>
+#include <QPixmap>
 #include <QString>
 #include <QVector>
 #include <QWidget>
 
 class QContextMenuEvent;
-class QLabel;
 class QMouseEvent;
-class QStackedLayout;
 class QTimer;
 
 namespace sw::model600::ui {
 
-namespace hw {
-class Panel;
-class LinkRow;
-class Knob;
-class Selector;
-class Toggle;
-class Button;
-class Lamp;
-class DigitalMeter;
-class Ladder;
-class SegDisplay;
-class MiniStrip;
-} // namespace hw
 
 class HeaderBar;
 class LedMeter;
@@ -71,7 +59,10 @@ struct L {
 };
 
 // -----------------------------------------------------------------------------
-//  10-second automatic input calibration (measuring / result states).
+//  10-second automatic input calibration: the "INPUT CALIBRATOR" module of the
+//  v2 design (docs/design/v2/DESIGN_V2.md section 13). One Blender plate for all
+//  states; the cue card, meter, 7-segment window, progress LEDs, status lamp
+//  and buttons change with the state.
 // -----------------------------------------------------------------------------
 class CalibrationDialog : public QDialog {
     Q_OBJECT
@@ -88,30 +79,35 @@ private slots:
 private:
     void start();
     void show_result();
-    void build_measuring_page();
-    void build_result_page();
+    void set_buttons(const QString& secondary, const QString& primary, bool primary_enabled);
+    QString tr2(const char* en, const char* ja) const;
+
     dsp::Engine* engine_;
     UiLang lang_;
     State state_ = State::Measuring;
     bool started_ = false;
     QTimer* timer_ = nullptr;
-    QStackedLayout* pages_ = nullptr;
-    // Measuring page.
-    LedMeter* input_meter_ = nullptr;
-    QWidget* progress_ = nullptr;
-    QLabel* time_label_ = nullptr;
-    // Result page.
-    QLabel* title_ = nullptr;
-    QLabel* body_ = nullptr;
-    QWidget* result_bar_ = nullptr;
-    Readout* r1_ = nullptr;
-    Readout* r2_ = nullptr;
-    Readout* r3_ = nullptr;
-    KnobView* knob_ = nullptr;
-    QLabel* knob_text_ = nullptr;
-    LedMeter* measured_meter_ = nullptr;
-    RackKey* secondary_ = nullptr;
-    RackKey* primary_ = nullptr;
+    QElapsedTimer clock_;
+    qint64 last_ms_ = 0;
+    hw::PeakHold peak_;
+
+    // Plate and live parts.
+    QPixmap bg_;
+    QJsonObject cal_;
+    std::array<hw::Led*, 3> steps_{nullptr, nullptr, nullptr};
+    hw::Lamp* lamp_ = nullptr;
+    hw::DigitalMeter* meter_ = nullptr;
+    hw::SegDisplay* seg_ = nullptr;
+    hw::Ladder* ladder_ = nullptr;
+    hw::Knob* guide_ = nullptr;
+    hw::Button* secondary_ = nullptr;
+    hw::Button* primary_ = nullptr;
+
+    // Text printed by the app over the plate (follows the UI language).
+    QString title_, card_head_, seg_label_, secondary_text_, primary_text_;
+    QStringList body_, card_, hint_;
+    bool card_large_ = true;
+    bool primary_enabled_ = true;
 };
 
 // -----------------------------------------------------------------------------
@@ -161,15 +157,6 @@ private slots:
     void toggle_audition();
 
 private:
-    // Peak ballistics like OBS's mixer: instant attack, 20 dB/s fall; the
-    // number shows a 1.5 s peak hold so it stays readable.
-    struct Peak {
-        float bar = -120.0f, hold = -120.0f;
-        qint64 hold_ms = 0;
-        void feed(float db, qint64 now_ms, float dt_s);
-        void reset() { bar = hold = -120.0f; hold_ms = 0; }
-    };
-
     void build_ui();
     void build_panel();
 
@@ -209,7 +196,7 @@ private:
     QVector<hw::Knob*> trims_;                 // UNIT 05 channel trims (01..04).
     hw::Ladder* ladder_ = nullptr;
     QHash<QString, hw::SegDisplay*> segs_;
-    std::array<Peak, 6> peaks_{};              // 0..3 unit / channels, 4 master.
+    std::array<hw::PeakHold, 6> peaks_{};      // 0..3 unit / channels, 4 master.
     QElapsedTimer clock_;
     qint64 last_ms_ = 0;
     qint64 flash_chapter_until_ = 0, flash_report_until_ = 0;

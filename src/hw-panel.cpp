@@ -130,6 +130,7 @@ Assets::Assets() {
     const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
     scale_ = root.value(QStringLiteral("scale")).toDouble(2.0);
     units_ = root.value(QStringLiteral("units")).toObject();
+    calibrator_ = root.value(QStringLiteral("calibrator")).toObject();
     const QJsonObject bgs = root.value(QStringLiteral("backgrounds")).toObject();
     for (auto it = bgs.begin(); it != bgs.end(); ++it) bg_files_.insert(it.key(), it.value().toString());
     const QJsonObject sprites = root.value(QStringLiteral("sprites")).toObject();
@@ -179,6 +180,16 @@ QPixmap Assets::sprite(const QString& name) const {
 }
 
 QSizeF Assets::sprite_size(const QString& name) const { return sizes_.value(name); }
+
+// =============================================================================
+//  PeakHold
+// =============================================================================
+void PeakHold::feed(float db, qint64 now_ms, float dt_s) {
+    if (!(db > -120.0f)) db = -120.0f;
+    bar = std::max(db, bar - 20.0f * dt_s);
+    if (db >= hold) { hold = db; hold_ms = now_ms; }
+    else if (now_ms - hold_ms > 1500) hold = std::max(bar, hold - 20.0f * dt_s);
+}
 
 // =============================================================================
 //  7-segment text
@@ -534,6 +545,22 @@ void Lamp::paintEvent(QPaintEvent*) {
     QPainter p(this);
     smooth(p);
     blit(p, QRectF(rect()), Assets::get().sprite(QStringLiteral("lamp_%1_%2").arg(color_, lit_ ? QStringLiteral("on") : QStringLiteral("off"))));
+}
+
+// =============================================================================
+//  Led
+// =============================================================================
+Led::Led(QPointF centre, QWidget* parent) : QWidget(parent) {
+    setGeometry(centred_rect(centre, 16, 16));
+    setAttribute(Qt::WA_TransparentForMouseEvents, true);
+}
+
+void Led::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    smooth(p);
+    const QString name = state_ == State::On ? QStringLiteral("led_on")
+                         : state_ == State::Idle ? QStringLiteral("led_idle") : QStringLiteral("led_off");
+    blit(p, QRectF(rect()), Assets::get().sprite(name));
 }
 
 // =============================================================================

@@ -9,12 +9,13 @@
 
 #include <QContextMenuEvent>
 #include <QDesktopServices>
+#include <QFontInfo>
+#include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHideEvent>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
@@ -22,7 +23,6 @@
 #include <QPalette>
 #include <QScreen>
 #include <QShowEvent>
-#include <QStackedLayout>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -55,203 +55,103 @@ QPalette studio_palette() {
     return pal;
 }
 
-QLabel* make_text(const QString& text, int px, int weight, const QColor& color, QWidget* parent,
-                  bool wrap = false) {
-    auto* l = new QLabel(text, parent);
-    l->setFont(make_font(px, weight));
-    QPalette pal = l->palette();
-    pal.setColor(QPalette::WindowText, color);
-    l->setPalette(pal);
-    l->setWordWrap(wrap);
-    return l;
-}
-
-// Rounded panel background (strips, master section, script card).
-class PanelBox : public QWidget {
-public:
-    explicit PanelBox(QWidget* parent = nullptr, qreal radius = 6) : QWidget(parent), radius_(radius) {}
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        p.setPen(QPen(Tok::line, 1));
-        p.setBrush(Tok::panel);
-        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius_, radius_);
-    }
-private:
-    qreal radius_;
-};
-
-// 4 px status colour bar on the left of a calibration result.
-class ColorBar : public QWidget {
-public:
-    explicit ColorBar(QWidget* parent = nullptr) : QWidget(parent) { setFixedWidth(4); }
-    void set_color(const QColor& c) { color_ = c; update(); }
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        p.setPen(Qt::NoPen);
-        p.setBrush(color_);
-        p.drawRoundedRect(QRectF(rect()), 2, 2);
-    }
-private:
-    QColor color_ = Tok::ok;
-};
-
-// Amber progress track.
-class Progress : public QWidget {
-public:
-    explicit Progress(QWidget* parent = nullptr) : QWidget(parent) { setFixedHeight(10); }
-    void set_value(qreal v) { if (std::abs(v - value_) > 1e-3) { value_ = v; update(); } }
-protected:
-    void paintEvent(QPaintEvent*) override {
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        p.setPen(QPen(Tok::line, 1));
-        p.setBrush(Tok::off);
-        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 5, 5);
-        p.setPen(Qt::NoPen);
-        p.setBrush(Tok::accent);
-        p.drawRoundedRect(QRectF(0, 0, width() * std::clamp(value_, 0.0, 1.0), height()), 5, 5);
-    }
-private:
-    qreal value_ = 0;
-};
-
 } // namespace
 
 // =============================================================================
-//  CalibrationDialog
+//  CalibrationDialog ("INPUT CALIBRATOR", GUI v2)
 // =============================================================================
+namespace {
+
+const QColor kCardInk(0x2A, 0x24, 0x1A);
+const QColor kCardDim(0x6B, 0x5D, 0x45);
+
+QPointF cal_point(const QJsonObject& o) {
+    return {o.value(QStringLiteral("cx")).toDouble(), o.value(QStringLiteral("cy")).toDouble()};
+}
+
+// Knob guide position (percent of the sweep) for "aim for 1:30" and "turn it down".
+constexpr double kGuideOk = 67.0;
+constexpr double kGuideDown = 94.0;
+
+void draw_lines(QPainter& p, double x, double y, const QStringList& lines, const QFont& f, const QColor& c, double lh) {
+    p.setFont(f);
+    p.setPen(c);
+    const double step = QFontInfo(f).pixelSize() * lh;
+    for (int i = 0; i < lines.size(); ++i) p.drawText(QPointF(x, y + i * step), lines.at(i));
+}
+
+} // namespace
+
 CalibrationDialog::CalibrationDialog(dsp::Engine* engine, UiLang lang, QWidget* parent)
     : QDialog(parent), engine_(engine), lang_(lang) {
     install_fonts();
     setPalette(studio_palette());
     setAutoFillBackground(false);
+    setAttribute(Qt::WA_OpaquePaintEvent, true);
     setModal(true);
-    setFixedSize(560, 400);
-    setWindowTitle(L{QStringLiteral("MODEL 600  -  Automatic Input Calibration"),
-                     QStringLiteral("MODEL 600  -  入力レベル自動測定")}.pick(lang_));
-    auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(24, 78, 24, 24);
-    pages_ = new QStackedLayout();
-    root->addLayout(pages_);
-    build_measuring_page();
-    build_result_page();
+    setWindowTitle(tr2("MODEL 600  -  Automatic Input Calibration", "MODEL 600  -  入力レベル自動測定"));
+
+    const hw::Assets& a = hw::Assets::get();
+    cal_ = a.calibrator();
+    bg_ = a.background(QStringLiteral("cal"));
+    const QJsonObject panel = cal_.value(QStringLiteral("panel")).toObject();
+    setFixedSize(panel.value(QStringLiteral("w")).toInt(640), panel.value(QStringLiteral("h")).toInt(450));
+
+    const QJsonObject st = cal_.value(QStringLiteral("steps")).toObject();
+    const QJsonArray xs = st.value(QStringLiteral("xs")).toArray();
+    for (int i = 0; i < 3 && i < xs.size(); ++i)
+        steps_[static_cast<std::size_t>(i)] = new hw::Led(QPointF(xs.at(i).toDouble(), st.value(QStringLiteral("y")).toDouble()), this);
+
+    lamp_ = new hw::Lamp(cal_point(cal_.value(QStringLiteral("lamp")).toObject()), QStringLiteral("amber"), this);
+
+    const QJsonObject m = cal_.value(QStringLiteral("meter")).toObject();
+    const QPointF mc = cal_point(m);
+    const double mw = m.value(QStringLiteral("w")).toDouble() - 28, mh = m.value(QStringLiteral("h")).toDouble() - 28;
+    meter_ = new hw::DigitalMeter(QRectF(mc.x() - mw / 2, mc.y() - mh / 2, mw, mh), hw::DigitalMeter::Kind::Dbfs, this);
+    meter_->setCursor(Qt::ArrowCursor);
+
+    const QJsonObject g = cal_.value(QStringLiteral("seg")).toObject();
+    const QPointF gc = cal_point(g);
+    const double gw = g.value(QStringLiteral("w")).toDouble(), gh = g.value(QStringLiteral("h")).toDouble();
+    seg_ = new hw::SegDisplay(QRectF(gc.x() - gw / 2, gc.y() - gh / 2, gw, gh), 4, this);
+
+    const QJsonObject l = cal_.value(QStringLiteral("ladder")).toObject();
+    ladder_ = new hw::Ladder(cal_point(l), l.value(QStringLiteral("n")).toInt(12), {{0.0, QStringLiteral("amber")}}, this);
+
+    const QJsonObject k = cal_.value(QStringLiteral("guide_knob")).toObject();
+    guide_ = new hw::Knob(QStringLiteral("knob_mid"), cal_point(k), k.value(QStringLiteral("r")).toDouble(), 0.0, 100.0,
+                          kGuideOk, this);
+    guide_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    guide_->setFocusPolicy(Qt::NoFocus);
+    guide_->setVisible(false);
+
+    const QJsonArray bs = cal_.value(QStringLiteral("buttons")).toArray();
+    auto make_button = [this](const QJsonObject& b) {
+        return new hw::Button(cal_point(b), b.value(QStringLiteral("w")).toInt(54), b.value(QStringLiteral("h")).toInt(34),
+                              b.value(QStringLiteral("color")).toString(), this);
+    };
+    secondary_ = make_button(bs.at(0).toObject());
+    primary_ = make_button(bs.at(1).toObject());
+
     timer_ = new QTimer(this);
     timer_->setInterval(33);
     connect(timer_, &QTimer::timeout, this, &CalibrationDialog::tick);
+    clock_.start();
 }
 
-void CalibrationDialog::build_measuring_page() {
-    auto* page = new QWidget(this);
-    auto* v = new QVBoxLayout(page);
-    v->setContentsMargins(0, 0, 0, 0);
-    v->setSpacing(0);
-
-    auto* card = new PanelBox(page);
-    card->setFixedHeight(110);
-    auto* cv = new QVBoxLayout(card);
-    cv->setContentsMargins(16, 12, 16, 12);
-    cv->addWidget(new SectionLabel(L{QStringLiteral("Read aloud"), QStringLiteral("読み上げ文")}.pick(lang_), card));
-    cv->addSpacing(6);
-    const QString script = L{QStringLiteral("“Hello everyone, welcome back to the stream.\n Let's make today a great one.”"),
-                             QStringLiteral("「みなさんこんばんは、配信へようこそ。\n　今日も楽しい時間にしていきましょう。」")}.pick(lang_);
-    cv->addWidget(make_text(script, 16, QFont::Medium, Tok::t1, card));
-    cv->addStretch(1);
-    v->addWidget(card);
-    v->addSpacing(20);
-
-    auto* in_row = new QHBoxLayout();
-    auto* in_label = new SectionLabel(QStringLiteral("INPUT"), page);
-    in_label->setFixedWidth(72);
-    in_row->addWidget(in_label);
-    input_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Horizontal, page);
-    input_meter_->setFixedHeight(12);
-    in_row->addWidget(input_meter_, 1);
-    v->addLayout(in_row);
-    v->addSpacing(22);
-
-    auto* pr_row = new QHBoxLayout();
-    auto* pr_label = new SectionLabel(QStringLiteral("PROGRESS"), page);
-    pr_label->setFixedWidth(72);
-    pr_row->addWidget(pr_label);
-    progress_ = new Progress(page);
-    pr_row->addWidget(progress_, 1);
-    pr_row->addSpacing(16);
-    time_label_ = make_text(QString(), 11, QFont::Medium, Tok::t1, page);
-    time_label_->setFixedWidth(96);
-    time_label_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    pr_row->addWidget(time_label_);
-    v->addLayout(pr_row);
-    v->addSpacing(28);
-
-    v->addWidget(make_text(L{QStringLiteral("Keep reading at your normal streaming volume."),
-                             QStringLiteral("普段の配信と同じ声の大きさで、そのまま読み続けてください。")}.pick(lang_),
-                           12, QFont::Medium, Tok::t2, page, true));
-    v->addStretch(1);
-    auto* buttons = new QHBoxLayout();
-    buttons->addStretch(1);
-    auto* cancel = new RackKey(L{QStringLiteral("Cancel"), QStringLiteral("中止")}.pick(lang_), page);
-    cancel->setFixedSize(96, 34);
-    connect(cancel, &RackKey::clicked, this, &CalibrationDialog::reject);
-    buttons->addWidget(cancel);
-    v->addLayout(buttons);
-    pages_->addWidget(page);
+QString CalibrationDialog::tr2(const char* en, const char* ja) const {
+    return lang_ == UiLang::JA ? QString::fromUtf8(ja) : QString::fromUtf8(en);
 }
 
-void CalibrationDialog::build_result_page() {
-    auto* page = new QWidget(this);
-    auto* outer = new QVBoxLayout(page);
-    outer->setContentsMargins(0, 0, 0, 0);
-    auto* h = new QHBoxLayout();
-    h->setSpacing(14);
-    auto* bar = new ColorBar(page);
-    result_bar_ = bar;
-    h->addWidget(bar);
-    auto* v = new QVBoxLayout();
-    v->setSpacing(4);
-    title_ = make_text(QString(), 15, QFont::DemiBold, Tok::t1, page);
-    body_ = make_text(QString(), 12, QFont::Medium, Tok::t2, page, true);
-    v->addWidget(title_);
-    v->addWidget(body_);
-    v->addSpacing(12);
-    auto* readouts = new QHBoxLayout();
-    readouts->setSpacing(8);
-    r1_ = new Readout(QString(), QString(), false, page);
-    r2_ = new Readout(QString(), QString(), false, page);
-    r3_ = new Readout(QString(), QString(), false, page);
-    for (Readout* r : {r1_, r2_, r3_}) { r->setFixedSize(148, 60); readouts->addWidget(r); }
-    readouts->addStretch(1);
-    v->addLayout(readouts);
-    v->addSpacing(10);
-    auto* knob_row = new QHBoxLayout();
-    knob_ = new KnobView(page);
-    knob_row->addWidget(knob_);
-    knob_row->addSpacing(8);
-    knob_text_ = make_text(QString(), 12, QFont::Medium, Tok::t1, page, true);
-    knob_row->addWidget(knob_text_, 1);
-    v->addLayout(knob_row);
-    measured_meter_ = new LedMeter(LedMeter::Kind::Level, Qt::Horizontal, page);
-    measured_meter_->set_scale_visible(true);
-    measured_meter_->setFixedHeight(32);
-    v->addWidget(measured_meter_);
-    v->addStretch(1);
-    h->addLayout(v, 1);
-    outer->addLayout(h, 1);
-    auto* buttons = new QHBoxLayout();
-    buttons->addStretch(1);
-    secondary_ = new RackKey(QString(), page);
-    primary_ = new RackKey(QString(), page);
-    primary_->set_style(RackKey::Style::Primary);
-    secondary_->setFixedSize(96, 34);
-    primary_->setFixedSize(96, 34);
-    buttons->addWidget(secondary_);
-    buttons->addSpacing(8);
-    buttons->addWidget(primary_);
-    outer->addLayout(buttons);
-    pages_->addWidget(page);
+void CalibrationDialog::set_buttons(const QString& secondary, const QString& primary, bool primary_enabled) {
+    secondary_->disconnect();
+    primary_->disconnect();
+    secondary_text_ = secondary;
+    primary_text_ = primary;
+    primary_enabled_ = primary_enabled;
+    primary_->setEnabled(primary_enabled);
+    primary_->set_lit(primary_enabled);   // The default action is the lit button.
+    secondary_->set_lit(false);
 }
 
 void CalibrationDialog::showEvent(QShowEvent* e) {
@@ -262,11 +162,34 @@ void CalibrationDialog::showEvent(QShowEvent* e) {
 void CalibrationDialog::start() {
     started_ = true;
     state_ = State::Measuring;
-    pages_->setCurrentIndex(0);
     engine_->start_calibration(10.0f);
     engine_->telemetry().reset_holds();
-    input_meter_->reset_hold();
+    peak_.reset();
+    last_ms_ = 0;
+
+    steps_[0]->set_state(hw::Led::State::On);
+    steps_[1]->set_state(hw::Led::State::Idle);
+    steps_[2]->set_state(hw::Led::State::Off);
+    lamp_->set_color(QStringLiteral("amber"));
+    lamp_->set_lit(true);
+    title_ = tr2("Measuring", "測定中");
+    body_ = lang_ == UiLang::JA ? QStringList{QStringLiteral("普段の配信と同じ声の大きさで、"), QStringLiteral("カードを読み続けてください。")}
+                                : QStringList{QStringLiteral("Keep reading the card at your"), QStringLiteral("normal streaming volume.")};
+    card_head_ = tr2("READ ALOUD", "READ ALOUD  ／  読み上げ文");
+    card_ = lang_ == UiLang::JA
+        ? QStringList{QStringLiteral("「みなさんこんばんは、配信へようこそ。"), QStringLiteral("  今日も楽しい時間にしていきましょう。」")}
+        : QStringList{QStringLiteral("“Hello everyone, welcome back to the stream."), QStringLiteral("  Let's make today a great one.”")};
+    card_large_ = true;
+    seg_label_ = QStringLiteral("SECONDS  /  10");
+    hint_ = QStringList{tr2("Press Esc to cancel.", "Esc で中止できます。")};
+    guide_->setVisible(false);
+    ladder_->set_zones({{0.0, QStringLiteral("amber")}});
+    ladder_->set_lit(0);
+    meter_->set_kind(hw::DigitalMeter::Kind::Dbfs);
+    set_buttons(tr2("Cancel", "中止"), tr2("Done", "完了"), false);
+    connect(secondary_, &QAbstractButton::clicked, this, &CalibrationDialog::reject);
     timer_->start();
+    tick();
     update();
 }
 
@@ -278,123 +201,151 @@ void CalibrationDialog::reject() {
 
 void CalibrationDialog::tick() {
     auto& c = engine_->calibrator();
-    auto& t = engine_->telemetry();
-    input_meter_->set_level(t.true_peak_db.load(), t.rms_db.load(), t.peak_hold_db.load());
-    static_cast<Progress*>(progress_)->set_value(c.progress());
-    time_label_->setText(QStringLiteral("%1 / 10.0 %2")
-        .arg(QString::number(static_cast<double>(c.progress()) * 10.0, 'f', 1).rightJustified(4, QLatin1Char('0')),
-             L{QStringLiteral("s"), QStringLiteral("秒")}.pick(lang_)));
+    const auto& t = engine_->telemetry();
+    const qint64 now = clock_.elapsed();
+    const float dt = last_ms_ > 0 ? std::clamp(static_cast<float>(now - last_ms_) / 1000.0f, 0.0f, 0.25f) : 0.033f;
+    last_ms_ = now;
+    peak_.feed(t.sample_peak_db.load(), now, dt);
+    const float progress = std::clamp(c.progress(), 0.0f, 1.0f);
+    meter_->set_values(peak_.bar, peak_.hold,
+                       peak_.hold > -99.0f ? QString::number(static_cast<double>(peak_.hold), 'f', 1) : QStringLiteral("----"),
+                       QStringLiteral("PEAK"), QStringLiteral("dBFS"),
+                       QStringLiteral("VOICE  %1 %").arg(static_cast<int>(std::lround(c.voice_ratio() * 100.0f))));
+    seg_->set_text(QString::number(static_cast<double>(progress) * 10.0, 'f', 1));
+    ladder_->set_lit(static_cast<int>(std::floor(progress * static_cast<float>(ladder_->segments()) + 1e-4f)));
     if (c.done()) { timer_->stop(); show_result(); }
 }
 
 void CalibrationDialog::show_result() {
     auto& c = engine_->calibrator();
     const bool ja = lang_ == UiLang::JA;
-    secondary_->disconnect();
-    primary_->disconnect();
-    r3_->setVisible(true);
-    knob_->setVisible(true);
-    knob_text_->setVisible(true);
-    measured_meter_->setVisible(false);
+    steps_[0]->set_state(hw::Led::State::On);
+    steps_[1]->set_state(hw::Led::State::On);
+    steps_[2]->set_state(hw::Led::State::Idle);
+    card_head_ = tr2("RESULT", "RESULT  ／  結果");
+    card_large_ = false;
+    seg_label_ = QStringLiteral("INPUT GAIN  dB");
+    ladder_->set_lit(ladder_->segments());
+    const float gain_now = engine_->params().input_gain_db.load();
+    auto seg_gain = [](float g) { return std::abs(g) < 0.05f ? QStringLiteral("0.0") : QString::number(static_cast<double>(g), 'f', 1); };
+
     if (c.result_clipped()) {
         state_ = State::Clipped;
-        static_cast<ColorBar*>(result_bar_)->set_color(Tok::error);
-        title_->setText(ja ? QStringLiteral("入力が歪んでいます") : QStringLiteral("The input is clipping"));
-        body_->setText(ja ? QStringLiteral("オーディオインターフェース本体の GAIN つまみを下げてから、\nもう一度測定してください。クリップランプが点かない位置が目安です。")
-                          : QStringLiteral("Turn down the GAIN knob on your audio interface, then measure again. Aim for a position where the clip light stays off."));
-        r1_->set_label(QStringLiteral("CLIPPED"));
-        r1_->set_unit(ja ? QStringLiteral("秒") : QStringLiteral("s"));
-        r1_->set_value(QString::number(static_cast<double>(c.clipped_seconds()), 'f', 1), Tok::error);
-        r2_->set_label(QStringLiteral("INPUT GAIN"));
-        r2_->set_unit(ja ? QStringLiteral("dB（変更なし）") : QStringLiteral("dB unchanged"));
-        r2_->set_value(fmt_signed(engine_->params().input_gain_db.load()));
-        r3_->setVisible(false);
-        knob_->set_pointer(120);
-        knob_->set_turn_down_hint(true);
-        knob_text_->setText(ja ? QStringLiteral("つまみを左へ回して\nクリップランプを消してください。")
-                               : QStringLiteral("Turn the knob left until\nthe clip light stays off."));
-        secondary_->setText(ja ? QStringLiteral("閉じる") : QStringLiteral("Close"));
-        primary_->setText(ja ? QStringLiteral("再測定") : QStringLiteral("Measure"));
-        connect(secondary_, &RackKey::clicked, this, &CalibrationDialog::reject);
-        connect(primary_, &RackKey::clicked, this, &CalibrationDialog::start);
+        lamp_->set_color(QStringLiteral("red"));
+        title_ = tr2("The input is clipping", "入力が歪んでいます");
+        body_ = ja ? QStringList{QStringLiteral("インターフェースの GAIN を下げてから、"), QStringLiteral("もう一度測定してください。")}
+                   : QStringList{QStringLiteral("Turn down the GAIN on your interface,"), QStringLiteral("then measure again.")};
+        const QString secs = QString::number(static_cast<double>(c.clipped_seconds()), 'f', 1);
+        card_ = ja ? QStringList{QStringLiteral("%1 秒間、入力が 0 dBFS に張り付きました。").arg(secs), QStringLiteral("入力ゲインは変更していません。")}
+                   : QStringList{QStringLiteral("The input sat at 0 dBFS for %1 s.").arg(secs), QStringLiteral("The input gain was not changed.")};
+        meter_->set_values(0.0, 0.0, secs, QStringLiteral("CLIPPED"), QStringLiteral("s"),
+                           QStringLiteral("INPUT GAIN %1 dB").arg(fmt_signed(gain_now)));
+        seg_->set_text(seg_gain(gain_now));
+        ladder_->set_zones({{0.0, QStringLiteral("red")}});
+        guide_->set_value(kGuideDown);
+        guide_->setVisible(true);
+        hint_ = ja ? QStringList{QStringLiteral("つまみを左へ回して、"), QStringLiteral("クリップランプが消える位置にします。")}
+                   : QStringList{QStringLiteral("Turn the knob left until"), QStringLiteral("the clip light stays off.")};
+        set_buttons(tr2("Close", "閉じる"), tr2("Measure", "再測定"), true);
+        connect(secondary_, &QAbstractButton::clicked, this, &CalibrationDialog::reject);
+        connect(primary_, &QAbstractButton::clicked, this, &CalibrationDialog::start);
     } else if (c.result_silent() || !c.result_ok()) {
         state_ = State::NoVoice;
-        static_cast<ColorBar*>(result_bar_)->set_color(Tok::warn);
-        title_->setText(ja ? QStringLiteral("声を検出できませんでした") : QStringLiteral("No voice was detected"));
-        body_->setText(ja ? QStringLiteral("マイクのミュートと、OBS の入力デバイスの選択を確認してください。\n入力ゲインは変更していません。")
-                          : QStringLiteral("Check that your mic is not muted and that OBS uses the right input device. The input gain was not changed."));
-        r1_->set_label(QStringLiteral("VOICE DETECTED"));
-        r1_->set_unit(QStringLiteral("%"));
-        r1_->set_value(QString::number(static_cast<int>(std::lround(c.voice_ratio() * 100.0f))), Tok::warn);
-        r2_->set_label(QStringLiteral("REQUIRED"));
-        r2_->set_unit(ja ? QStringLiteral("% 以上") : QStringLiteral("% min"));
-        r2_->set_value(QStringLiteral("20"));
-        r3_->setVisible(false);
-        knob_->setVisible(false);
-        knob_text_->setVisible(false);
-        const auto& t = engine_->telemetry();
-        measured_meter_->set_level(t.peak_hold_db.load(), t.rms_db.load(), t.peak_hold_db.load());
-        measured_meter_->setVisible(true);
-        secondary_->setText(ja ? QStringLiteral("閉じる") : QStringLiteral("Close"));
-        primary_->setText(ja ? QStringLiteral("再測定") : QStringLiteral("Measure"));
-        connect(secondary_, &RackKey::clicked, this, &CalibrationDialog::reject);
-        connect(primary_, &RackKey::clicked, this, &CalibrationDialog::start);
+        lamp_->set_color(QStringLiteral("amber"));
+        title_ = tr2("No voice was detected", "声を検出できませんでした");
+        body_ = ja ? QStringList{QStringLiteral("マイクのミュートと、OBS の"), QStringLiteral("入力デバイスを確認してください。")}
+                   : QStringList{QStringLiteral("Check the mic mute and the input"), QStringLiteral("device selected in OBS.")};
+        const int pct = static_cast<int>(std::lround(c.voice_ratio() * 100.0f));
+        card_ = ja ? QStringList{QStringLiteral("声として検出できたのは %1 %（20 % 以上が必要）。").arg(pct), QStringLiteral("入力ゲインは変更していません。")}
+                   : QStringList{QStringLiteral("Voice was detected %1 % of the time (20 % needed).").arg(pct), QStringLiteral("The input gain was not changed.")};
+        const float pk = engine_->telemetry().peak_hold_db.load();
+        meter_->set_values(pk, pk, QString::number(pct), QStringLiteral("VOICE"), QStringLiteral("%"), QStringLiteral("REQUIRED 20 %"));
+        seg_->set_text(seg_gain(gain_now));
+        ladder_->set_zones({{0.0, QStringLiteral("amber")}});
+        guide_->setVisible(false);
+        hint_ = ja ? QStringList{QStringLiteral("マイクの物理ミュートスイッチも"), QStringLiteral("確認してください。")}
+                   : QStringList{QStringLiteral("Also check the hardware mute"), QStringLiteral("switch on the mic.")};
+        set_buttons(tr2("Close", "閉じる"), tr2("Measure", "再測定"), true);
+        connect(secondary_, &QAbstractButton::clicked, this, &CalibrationDialog::reject);
+        connect(primary_, &QAbstractButton::clicked, this, &CalibrationDialog::start);
     } else {
         state_ = State::Success;
         engine_->commit_calibration();
-        static_cast<ColorBar*>(result_bar_)->set_color(Tok::ok);
-        title_->setText(ja ? QStringLiteral("測定が完了しました") : QStringLiteral("Calibration complete"));
-        body_->setText(ja ? QStringLiteral("入力ゲインを自動で設定しました。") : QStringLiteral("The input gain has been set automatically."));
-        r1_->set_label(QStringLiteral("INPUT GAIN"));
-        r1_->set_unit(QStringLiteral("dB"));
-        r1_->set_value(fmt_signed(c.result_gain_db()));
-        r2_->set_label(QStringLiteral("REF. PEAK"));
-        r2_->set_unit(QStringLiteral("dBFS"));
-        r2_->set_value(fmt_db(c.result_reference_db()));
-        r3_->set_label(QStringLiteral("TARGET PEAK"));
-        r3_->set_unit(QStringLiteral("dBFS"));
-        r3_->set_value(fmt_db(c.target_peak_db()));
-        knob_->set_turn_down_hint(false);
-        knob_->set_ok_range(30, 60);
-        knob_->set_pointer(45);
+        lamp_->set_color(QStringLiteral("green"));
+        title_ = tr2("Calibration complete", "測定が完了しました");
+        body_ = ja ? QStringList{QStringLiteral("入力ゲインを自動で設定しました。"), QStringLiteral("このまま配信を始められます。")}
+                   : QStringList{QStringLiteral("The input gain has been set"), QStringLiteral("automatically. You are ready to go live.")};
+        const QString ref = fmt_db(c.result_reference_db()), target = fmt_db(c.target_peak_db()), gain = fmt_signed(c.result_gain_db());
+        card_ = ja ? QStringList{QStringLiteral("基準ピーク %1 dBFS  →  目標 %2 dBFS").arg(ref, target), QStringLiteral("入力ゲインを %1 dB にしました。").arg(gain)}
+                   : QStringList{QStringLiteral("Reference peak %1 dBFS  →  target %2 dBFS").arg(ref, target), QStringLiteral("Input gain set to %1 dB.").arg(gain)};
+        meter_->set_values(c.result_reference_db(), c.result_reference_db(), ref, QStringLiteral("REF. PEAK"), QStringLiteral("dBFS"),
+                           QStringLiteral("TARGET %1").arg(target));
+        seg_->set_text(seg_gain(c.result_gain_db()));
+        ladder_->set_zones({{0.0, QStringLiteral("green")}});
+        guide_->set_value(kGuideOk);
+        guide_->setVisible(true);
         const bool low = c.result_gain_db() > 12.0f;
-        knob_text_->setText(low
-            ? (ja ? QStringLiteral("入力が小さめです。GAIN つまみを少し右へ回すと\nさらに安定します（目安は1時〜2時）。")
-                  : QStringLiteral("Your input is low. Turn the GAIN knob slightly right\nfor more headroom (aim for 1 to 2 o'clock)."))
-            : (ja ? QStringLiteral("オーディオインターフェースの GAIN つまみは\n1時〜2時の位置が目安です。")
-                  : QStringLiteral("Set the GAIN knob on your audio interface\naround the 1 to 2 o'clock position.")));
-        secondary_->setText(ja ? QStringLiteral("再測定") : QStringLiteral("Measure"));
-        primary_->setText(ja ? QStringLiteral("完了") : QStringLiteral("Done"));
-        connect(secondary_, &RackKey::clicked, this, &CalibrationDialog::start);
-        connect(primary_, &RackKey::clicked, this, &CalibrationDialog::accept);
+        hint_ = low ? (ja ? QStringList{QStringLiteral("入力が小さめです。GAIN つまみを少し右へ"), QStringLiteral("回すとさらに安定します（目安は1時〜2時）。")}
+                          : QStringList{QStringLiteral("Your input is low. Turn the GAIN knob slightly"), QStringLiteral("right for more headroom (1 to 2 o'clock).")})
+                    : (ja ? QStringList{QStringLiteral("オーディオインターフェースの GAIN つまみは"), QStringLiteral("1時〜2時の位置が目安です。")}
+                          : QStringList{QStringLiteral("Set the GAIN knob on your audio interface"), QStringLiteral("around the 1 to 2 o'clock position.")});
+        set_buttons(tr2("Measure", "再測定"), tr2("Done", "完了"), true);
+        connect(secondary_, &QAbstractButton::clicked, this, &CalibrationDialog::start);
+        connect(primary_, &QAbstractButton::clicked, this, &CalibrationDialog::accept);
     }
-    pages_->setCurrentIndex(1);
+    lamp_->set_lit(true);
     update();
 }
 
 void CalibrationDialog::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.fillRect(rect(), Tok::faceplate);
-    p.setFont(make_font(14, QFont::DemiBold));
-    p.setPen(Tok::t1);
-    p.drawText(QPointF(24, 34), L{QStringLiteral("Automatic Input Calibration"), QStringLiteral("入力レベル自動測定")}.pick(lang_));
-    const QStringList steps = lang_ == UiLang::JA
-        ? QStringList{QStringLiteral("準備"), QStringLiteral("測定"), QStringLiteral("結果")}
-        : QStringList{QStringLiteral("Prepare"), QStringLiteral("Measure"), QStringLiteral("Result")};
-    const int cur = state_ == State::Measuring ? 1 : 2;
-    for (int i = 0; i < 3; ++i) {
-        const qreal x = width() - 24 - (3 - i) * 72;
-        const QColor col = i == cur ? Tok::accent : (i < cur ? Tok::t2 : Tok::t3);
-        p.setPen(Qt::NoPen);
-        p.setBrush(i <= cur ? col : Tok::line);
-        p.drawRoundedRect(QRectF(x, 24, 64, 3), 1.5, 1.5);
-        p.setFont(make_font(10, i == cur ? QFont::DemiBold : QFont::Medium));
-        p.setPen(col);
-        p.drawText(QPointF(x, 42), QStringLiteral("%1  %2").arg(i + 1).arg(steps[i]));
-    }
-    p.setPen(QPen(Tok::line, 1));
-    p.drawLine(QPointF(0, 58.5), QPointF(width(), 58.5));
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    if (bg_.isNull()) p.fillRect(rect(), Tok::faceplate);
+    else p.drawPixmap(QRectF(rect()), bg_, QRectF(bg_.rect()));
+    const QColor ink(0xE9, 0xE3, 0xD3), ink_dim(0xA9, 0xA4, 0x97);
+
+    // Status title + explanation next to the lamp.
+    const QJsonObject t = cal_.value(QStringLiteral("title")).toObject();
+    p.setFont(make_font(14, QFont::Bold, 0.4));
+    p.setPen(ink);
+    p.drawText(QPointF(t.value(QStringLiteral("x")).toDouble(), t.value(QStringLiteral("y")).toDouble()), title_);
+    const QJsonObject b = cal_.value(QStringLiteral("body")).toObject();
+    draw_lines(p, b.value(QStringLiteral("x")).toDouble(), b.value(QStringLiteral("y")).toDouble() + 10, body_,
+               make_font(10, QFont::DemiBold, 0.2), ink_dim, 1.45);
+
+    // Cue card.
+    const QJsonObject c = cal_.value(QStringLiteral("card")).toObject();
+    const double cx = c.value(QStringLiteral("x")).toDouble(), cy = c.value(QStringLiteral("y")).toDouble();
+    p.setFont(make_font(8, QFont::Bold, 1.4));
+    p.setPen(kCardDim);
+    p.drawText(QPointF(cx + 14, cy + 22), card_head_);
+    draw_lines(p, cx + 14, cy + 50, card_, make_font(card_large_ ? 13 : 11, QFont::Bold, 0.2), kCardInk, 1.6);
+
+    // 7-segment window label.
+    const QJsonObject g = cal_.value(QStringLiteral("seg")).toObject();
+    const QFont lf = make_font(9, QFont::DemiBold, 2.0);
+    p.setFont(lf);
+    p.setPen(ink_dim);
+    const double lw = QFontMetricsF(lf).horizontalAdvance(seg_label_);
+    p.drawText(QPointF(g.value(QStringLiteral("cx")).toDouble() - lw / 2, g.value(QStringLiteral("label_y")).toDouble()), seg_label_);
+
+    // Hint line (after the knob guide when it is shown).
+    const QJsonObject h = cal_.value(QStringLiteral("hint")).toObject();
+    const double hx = h.value(QStringLiteral("x")).toDouble() + (guide_->isVisible() ? 52.0 : 0.0);
+    draw_lines(p, hx, h.value(QStringLiteral("y")).toDouble() - 6, hint_, make_font(10, QFont::DemiBold, 0.2), ink_dim, 1.45);
+
+    // Button names under the caps.
+    const QFont bf = make_font(9, QFont::Bold, 1.0);
+    p.setFont(bf);
+    const QFontMetricsF bm(bf);
+    auto label = [&](const hw::Button* btn, const QString& text, bool enabled) {
+        const QRectF r = btn->geometry();
+        p.setPen(enabled ? ink : ink_dim);
+        p.drawText(QPointF(r.center().x() - bm.horizontalAdvance(text) / 2, r.center().y() + 17 + 22), text);
+    };
+    label(secondary_, secondary_text_, true);
+    label(primary_, primary_text_, primary_enabled_);
 }
 
 // =============================================================================
@@ -431,13 +382,6 @@ double knob_default(const QString& id) {
 }
 
 } // namespace
-
-void StudioConsole::Peak::feed(float db, qint64 now_ms, float dt_s) {
-    if (!(db > -120.0f)) db = -120.0f;
-    bar = std::max(db, bar - 20.0f * dt_s);
-    if (db >= hold) { hold = db; hold_ms = now_ms; }
-    else if (now_ms - hold_ms > 1500) hold = std::max(bar, hold - 20.0f * dt_s);
-}
 
 StudioConsole::StudioConsole(dsp::Engine* engine, SharedBus* bus, bool director, bool pro, QWidget* parent)
     : QDialog(parent), engine_(engine), bus_(bus), director_(director && pro), pro_(pro) {
@@ -851,7 +795,7 @@ void StudioConsole::refresh_links() {
 
 void StudioConsole::refresh_unit(qint64 now, float dt) {
     const auto& t = engine_->telemetry();
-    Peak& pk = peaks_[0];
+    hw::PeakHold& pk = peaks_[0];
     pk.feed(t.sample_peak_db.load(), now, dt);
     const float lufs_s = t.lufs_s.load();
     if (!meters_.isEmpty()) {
@@ -901,7 +845,7 @@ void StudioConsole::refresh_unit(qint64 now, float dt) {
 #if defined(MODEL600_PRO_EDITION)
 void StudioConsole::refresh_director(qint64 now, float dt) {
     const auto& t = engine_->telemetry();
-    Peak& master = peaks_[4];
+    hw::PeakHold& master = peaks_[4];
     master.feed(t.sample_peak_db.load(), now, dt);
     if (auto* s = segs_.value(QStringLiteral("p")))
         s->set_text(seg_db(master.hold), master.hold > -1.0f ? hw::Disp::red : QColor());
@@ -923,7 +867,7 @@ void StudioConsole::refresh_director(qint64 now, float dt) {
                 live = true;
             }
         }
-        Peak& pk = peaks_[static_cast<std::size_t>(k)];
+        hw::PeakHold& pk = peaks_[static_cast<std::size_t>(k)];
         pk.feed(sp, now, dt);
         if (live)
             meters_[k]->set_values(pk.bar, pk.hold, seg_db(pk.hold), QStringLiteral("PEAK"), QStringLiteral("dBFS"),
@@ -966,7 +910,7 @@ void StudioConsole::refresh() {
     update_status();
     if (mini_) {
         const auto& t = engine_->telemetry();
-        const Peak& pk = peaks_[director_ ? 4 : 0];
+        const hw::PeakHold& pk = peaks_[director_ ? 4 : 0];
         if (director_)
             mini_bar_->set(pk.bar, pk.hold, {{QStringLiteral("PEAK"), seg_db(pk.hold)}, {QStringLiteral("S LUFS"), seg_db(t.lufs_s.load())},
                                              {QStringLiteral("I LUFS"), seg_db(t.lufs_i.load())}});
