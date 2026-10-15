@@ -1,0 +1,28 @@
+# Mac 版の配布物を作る：ビルド → Developer ID 署名 → Apple の公証 → .dmg（Mac 不要。kajisho5/runway の mac-notarize を使う）
+# 実行：Actions → release-mac → Run workflow（iPhone の GitHub アプリからも可）、または v1.0.0 などのタグを push
+# 公証済みの .dmg は実行結果の Artifacts からダウンロードする。
+# ※ プラグイン本体のコードができたら、build と products を実際の構成に合わせる（今は JUCE + CMake を想定）
+name: release-mac
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    uses: kajisho5/runway/.github/workflows/mac-notarize.yml@main
+    with:
+      name: model_600
+      build: >-
+        cmake -B build -G Xcode
+        -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+        && cmake --build build --config Release --parallel
+      products: |
+        build/**/Release/VST3/*.vst3
+        build/**/Release/AU/*.component
+    secrets: inherit
