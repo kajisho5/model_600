@@ -75,6 +75,9 @@ set(args
     -DENABLE_FRONTEND=OFF
     -DENABLE_SCRIPTING=OFF
     -DOBS_VERSION_OVERRIDE=${OBS_VERSION}
+    # OBS turns warnings into errors unless this is already defined; a newer
+    # Xcode (e.g. runway's default Xcode 26) must not fail the SDK on new warnings.
+    -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
     -C "${OUT}/init.cmake")
 # List-valued cache entries go through an initial-cache script: passed on the
 # command line, execute_process would split them at the ';'.

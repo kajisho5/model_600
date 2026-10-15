@@ -200,3 +200,35 @@ jobs:
         with:
           name: gui-samples-${{ runner.os }}
           path: gui-samples-out/*.png
+
+  # The exact build kajisho5/runway's mac-notarize runs before Developer ID
+  # signing (tools/ci/build_macos_release.sh, runway's default Xcode 26), with
+  # an ad-hoc hardened-runtime signature standing in for the real one.
+  macos-release:
+    name: macOS release build (runway, Xcode 26)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        shell: bash
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -vi beta | sort -V | tail -n 1 || true)
+          if [ -z "$x" ]; then echo "Xcode 26 is not on this runner:"; ls -d /Applications/Xcode*.app; exit 1; fi
+          sudo xcode-select -s "$x/Contents/Developer"
+          xcodebuild -version
+
+      - name: Cache OBS SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/obs-sdk
+          key: obs-sdk-macOS-xcode26-${{ hashFiles('tools/ci/obs_sdk.cmake') }}
+
+      - name: Build (same command as release-mac)
+        run: bash tools/ci/build_macos_release.sh
+
+      - name: Sign like runway (ad-hoc stand-in)
+        run: |
+          codesign --force --timestamp=none --options runtime --sign - dist-mac/model600.plugin
+          codesign --verify --strict --deep --verbose=2 dist-mac/model600.plugin
+          codesign -dvv dist-mac/model600.plugin 2>&1 | grep -E "flags|Format"

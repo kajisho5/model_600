@@ -219,6 +219,10 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_COPYRIGHT "(c) ${M600_YEAR} SEVENTHWELL")
+    # Licence notices travel inside the signed bundle.
+    target_sources(model600 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md")
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+                                PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 elseif(WIN32)
     set_target_properties(model600 PROPERTIES PREFIX "" SUFFIX ".dll")
 else()

@@ -70,6 +70,10 @@ ctest --test-dir build --output-on-failure
 - **macOS**: build, then double-click `install_mac.command` (clears Gatekeeper
   quarantine and installs the `.plugin`).
 
+Mac 配布用（Developer ID 署名＋公証済み .dmg）は `kajisho5/runway` の mac-notarize で作ります
+（手順は `CLAUDE.md`）。ビルドは `bash tools/ci/build_macos_release.sh` → 成果物は
+`dist-mac/model600.plugin`、.dmg 同梱の説明は `packaging/macos/README.txt`。
+
 CI packages (GitHub Actions artifacts `model600-<OS>-<edition>`):
 
 - `model600-Windows-*.zip`: `obs-plugins/64bit/model600.dll` — extract into the
