@@ -253,10 +253,18 @@ jobs:
           t="$RUNNER_TEMP/tamper"; mkdir -p "$t"
           cp -R "dist-mac/MODEL 600 Installer.app" dist-mac/model600.plugin "$t/"
           echo tampered >> "$t/model600.plugin/Contents/Resources/THIRD_PARTY_NOTICES.md"
-          if "$t/MODEL 600 Installer.app/Contents/MacOS/MODEL 600 Installer" --headless --dest "$RUNNER_TEMP/tamper-dest"; then
-            echo "::error::a modified plug-in was installed"; exit 1
-          fi
+          rc=0; "$t/MODEL 600 Installer.app/Contents/MacOS/MODEL 600 Installer" --headless --dest "$RUNNER_TEMP/tamper-dest" || rc=$?
+          [ "$rc" -eq 3 ] || { echo "::error::tampered plug-in: expected exit 3 (signature rejected), got $rc"; exit 1; }
           test ! -e "$RUNNER_TEMP/tamper-dest/model600.plugin"
+          # --dest is mandatory: a test run must never fall back to the real plug-ins folder.
+          rc=0; "$exe" --headless --dest || rc=$?
+          [ "$rc" -eq 64 ] || { echo "::error::--dest without a value: expected exit 64, got $rc"; exit 1; }
+          # A plug-in of another version (e.g. an older image still mounted) is not picked up.
+          o="$RUNNER_TEMP/oldver"; mkdir -p "$o"
+          cp -R "dist-mac/MODEL 600 Installer.app" dist-mac/model600.plugin "$o/"
+          plutil -replace CFBundleShortVersionString -string 0.0.1 "$o/model600.plugin/Contents/Info.plist"
+          rc=0; "$o/MODEL 600 Installer.app/Contents/MacOS/MODEL 600 Installer" --headless --dest "$RUNNER_TEMP/oldver-dest" || rc=$?
+          [ "$rc" -eq 2 ] || { echo "::error::other-version plug-in: expected exit 2 (not found), got $rc"; exit 1; }
 
       - name: DMG layout (dmgbuild, unsigned preview image)
         run: |

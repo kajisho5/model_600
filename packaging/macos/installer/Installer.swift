@@ -9,7 +9,8 @@
 //
 //  UI is the system alert only (NSAlert), ja / en via Localizable.strings.
 //  Flow: find plug-in -> check its signature -> confirm -> wait until OBS is
-//  quit -> stage + atomic replace -> done (optionally open OBS).
+//  quit -> copy + verify the copy -> OBS still quit? -> atomic replace ->
+//  done (optionally open OBS).
 //
 //  Safety:
 //    * The plug-in must pass code-signature validation. When this installer is
@@ -19,7 +20,7 @@
 //    * OBS is never quit by the installer; the user is asked to quit it.
 //
 //  Headless mode for CI:  <exe> --headless --dest <folder>
-//    Same find / verify / install steps without UI. Exit 0 on success.
+//    Same find / verify / install steps without UI (exit codes: headless()).
 // =============================================================================
 import AppKit
 import Security
@@ -34,7 +35,13 @@ private func L(_ key: String) -> String {
 
 struct InstallError: LocalizedError {
     let message: String
+    var isSignature = false
     var errorDescription: String? { message }
+
+    static var signature: InstallError { InstallError(message: L("error.signature"), isSignature: true) }
+    static func copy(_ error: Error) -> InstallError {
+        InstallError(message: String(format: L("error.copy"), error.localizedDescription))
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -50,77 +57,115 @@ enum Installer {
         NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist")) as? [String: Any]
     }
 
-    static func version(at bundle: URL) -> String? {
-        info(at: bundle)?["CFBundleShortVersionString"] as? String
-    }
-
     // Next to this app first. When Gatekeeper runs the app from a randomized
     // read-only copy (App Translocation), the sibling is missing, so the
-    // mounted volumes are searched too. A copy with this installer's version
-    // wins; otherwise the first MODEL 600 bundle found.
+    // mounted volumes are searched too. Only the plug-in built together with
+    // this installer (same version) qualifies: an older image that is still
+    // mounted must never be installed in its place.
     static func locatePlugin() -> URL? {
+        guard let mine = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String else {
+            return nil
+        }
         let fm = FileManager.default
         var candidates = [Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(kPluginName)]
         let volumes = fm.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? []
         candidates += volumes.map { $0.appendingPathComponent(kPluginName) }
-        let ours = candidates.filter { info(at: $0)?["CFBundleIdentifier"] as? String == kPluginID }
-        let mine = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        return ours.first { version(at: $0) == mine } ?? ours.first
+        return candidates.first {
+            let plist = info(at: $0)
+            return plist?["CFBundleIdentifier"] as? String == kPluginID
+                && plist?["CFBundleShortVersionString"] as? String == mine
+        }
     }
 
-    static func teamID(of url: URL) -> String? {
+    // What the plug-in's signature must satisfy: the same Team ID as this
+    // installer. Only an ad-hoc signed installer (CI and local builds) relaxes
+    // that to "any valid signature". Any Security API failure rejects.
+    static func pluginRequirement() throws -> SecRequirement? {
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code else { return nil }
+        guard SecStaticCodeCreateWithPath(Bundle.main.bundleURL as CFURL, [], &code) == errSecSuccess,
+              let code else { throw InstallError.signature }
         var info: CFDictionary?
         guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let dict = info as? [String: Any] else { return nil }
-        return dict[kSecCodeInfoTeamIdentifier as String] as? String
+              let dict = info as? [String: Any] else { throw InstallError.signature }
+        if let team = dict[kSecCodeInfoTeamIdentifier as String] as? String {
+            guard !team.isEmpty, team.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
+                throw InstallError.signature
+            }
+            let text = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
+            var requirement: SecRequirement?
+            guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess,
+                  let requirement else { throw InstallError.signature }
+            return requirement
+        }
+        let flags = (dict[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
+        guard flags & SecCodeSignatureFlags.adhoc.rawValue != 0 else { throw InstallError.signature }
+        return nil
     }
 
     static func verify(_ plugin: URL) throws {
+        let requirement = try pluginRequirement()
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(plugin as CFURL, [], &code) == errSecSuccess, let code else {
-            throw InstallError(message: L("error.signature"))
-        }
-        var requirement: SecRequirement?
-        if let team = teamID(of: Bundle.main.bundleURL) {
-            guard !team.isEmpty, team.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
-                throw InstallError(message: L("error.signature"))
-            }
-            let text = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
-            guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess else {
-                throw InstallError(message: L("error.signature"))
-            }
-        }
-        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures)
-        guard SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess else {
-            throw InstallError(message: L("error.signature"))
+        guard SecStaticCodeCreateWithPath(plugin as CFURL, [], &code) == errSecSuccess, let code,
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSCheckAllArchitectures), requirement) == errSecSuccess
+        else { throw InstallError.signature }
+    }
+
+    // A verified copy waiting in a scratch folder on the destination volume.
+    struct Staged {
+        let scratch: URL
+        let bundle: URL
+        let target: URL
+
+        func discard() {
+            try? FileManager.default.removeItem(at: scratch)
         }
     }
 
-    // Copies into a scratch folder on the same volume, then swaps it in, so a
-    // failure never leaves a half-copied bundle where OBS looks.
-    @discardableResult
-    static func install(_ plugin: URL, into folder: URL) throws -> URL {
+    // Step 1: copy into a scratch folder and verify the COPY (the source may
+    // have changed while the dialogs were open). Nothing where OBS looks has
+    // been touched yet.
+    static func stage(_ plugin: URL, into folder: URL) throws -> Staged {
         let fm = FileManager.default
-        let target = folder.appendingPathComponent(kPluginName, isDirectory: true)
+        let scratch: URL
         do {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            let scratch = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask,
-                                     appropriateFor: folder, create: true)
-            defer { try? fm.removeItem(at: scratch) }
-            let staged = scratch.appendingPathComponent(kPluginName, isDirectory: true)
-            try fm.copyItem(at: plugin, to: staged)
-            clearQuarantine(staged)
-            if fm.fileExists(atPath: target.path) {
-                _ = try fm.replaceItemAt(target, withItemAt: staged)
+            scratch = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                 appropriateFor: folder, create: true)
+        } catch {
+            throw InstallError.copy(error)
+        }
+        let staged = Staged(scratch: scratch,
+                            bundle: scratch.appendingPathComponent(kPluginName, isDirectory: true),
+                            target: folder.appendingPathComponent(kPluginName, isDirectory: true))
+        do {
+            try fm.copyItem(at: plugin, to: staged.bundle)
+            try verify(staged.bundle)
+        } catch let error as InstallError {
+            staged.discard()
+            throw error
+        } catch {
+            staged.discard()
+            throw InstallError.copy(error)
+        }
+        clearQuarantine(staged.bundle)
+        return staged
+    }
+
+    // Step 2: swap the verified copy in (atomic replace on the same volume).
+    @discardableResult
+    static func commit(_ staged: Staged) throws -> URL {
+        defer { staged.discard() }
+        let fm = FileManager.default
+        do {
+            if fm.fileExists(atPath: staged.target.path) {
+                _ = try fm.replaceItemAt(staged.target, withItemAt: staged.bundle)
             } else {
-                try fm.moveItem(at: staged, to: target)
+                try fm.moveItem(at: staged.bundle, to: staged.target)
             }
         } catch {
-            throw InstallError(message: String(format: L("error.copy"), error.localizedDescription))
+            throw InstallError.copy(error)
         }
-        return target
+        return staged.target
     }
 
     // The signature was checked above; drop the download quarantine like the
@@ -190,8 +235,23 @@ final class Flow {
                       action: L("retry"), cancel: L("cancel")) else { return }
         }
 
+        let staged: Installer.Staged
         do {
-            try Installer.install(plugin, into: Installer.defaultDestination)
+            staged = try Installer.stage(plugin, into: Installer.defaultDestination)
+        } catch {
+            fail(error.localizedDescription)
+            return
+        }
+        // OBS may have been started while the copy ran.
+        while obsRunning {
+            guard ask(L("running.title"), L("running.text"), style: .warning,
+                      action: L("retry"), cancel: L("cancel")) else {
+                staged.discard()
+                return
+            }
+        }
+        do {
+            try Installer.commit(staged)
         } catch {
             fail(error.localizedDescription)
             return
@@ -243,22 +303,33 @@ struct InstallerMain {
         app.run()
     }
 
+    // Exit codes: 0 installed, 1 copy failed, 2 plug-in not found,
+    // 3 signature rejected, 64 usage (--dest is required so a test run can
+    // never touch the real OBS plug-ins folder).
     static func headless(_ args: [String]) -> Int32 {
-        var dest = Installer.defaultDestination
-        if let i = args.firstIndex(of: "--dest"), i + 1 < args.count {
-            dest = URL(fileURLWithPath: args[i + 1], isDirectory: true)
+        func complain(_ text: String) {
+            FileHandle.standardError.write(Data("error: \(text)\n".utf8))
         }
+        guard let i = args.firstIndex(of: "--dest"), i + 1 < args.count,
+              !args[i + 1].isEmpty, !args[i + 1].hasPrefix("-") else {
+            complain("usage: --headless --dest <folder>")
+            return 64
+        }
+        let dest = URL(fileURLWithPath: args[i + 1], isDirectory: true)
         guard let plugin = Installer.locatePlugin() else {
-            FileHandle.standardError.write(Data("error: \(kPluginName) not found\n".utf8))
+            complain("\(kPluginName) (this installer's version) not found")
             return 2
         }
         do {
             try Installer.verify(plugin)
-            let target = try Installer.install(plugin, into: dest)
+            let target = try Installer.commit(Installer.stage(plugin, into: dest))
             print("installed \(plugin.path) -> \(target.path)")
             return 0
+        } catch let error as InstallError {
+            complain(error.message)
+            return error.isSignature ? 3 : 1
         } catch {
-            FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+            complain(error.localizedDescription)
             return 1
         }
     }

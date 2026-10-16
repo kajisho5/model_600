@@ -63,6 +63,8 @@
 ```
 
 - dmgbuild は、`stage` に集めた署名済みの成果物を `ditto` でコピーする。そのため署名は崩れない（dmgbuild 1.6.7 `core.py`）。
+- ボリューム名（窓のタイトル）は `settings.py` の `volume_name = "MODEL 600"` が優先される（dmgbuild は設定を読んだ後で `options["volume_name"]` を使う）。そのため、ここで渡す `$RW_NAME`（`MODEL600`）とずれない。
+- `settings.py` は、`stage` の中身が「インストーラー、プラグイン、README」以外だとエラーで止まる（背景はこの 3 つの配置で描いているため）。
 - 公証、ステープル、`spctl` は今のまま。
 
 ### 1-3. バージョンの既定値を対象リポのコミットにする

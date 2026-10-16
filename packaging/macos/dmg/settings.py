@@ -4,8 +4,8 @@
 #
 #    dmgbuild -s packaging/macos/dmg/settings.py -D stage=<folder> "<volume>" <out.dmg>
 #
-#  <folder> holds what goes into the image (signed by kajisho5/runway):
-#    MODEL 600 Installer.app, model600.plugin, README.txt
+#  <folder> holds exactly what goes into the image (signed by kajisho5/runway):
+#    MODEL 600 Installer.app, model600.plugin, README.txt (README optional)
 #  Design: docs/design/dmg/DMG_DESIGN.md (plan 1). Item positions match the
 #  background (background.png + background@2x.png, combined by dmgbuild into
 #  one HiDPI TIFF). dmgbuild executes this file; it does not set __file__,
@@ -26,14 +26,17 @@ _layout = {
     "model600.plugin": (436, 168),
     "README.txt": (572, 168),
 }
-_missing = [n for n in (_installer, "model600.plugin") if not os.path.exists(os.path.join(_stage, n))]
-if _missing:
-    raise ValueError(f"missing in stage: {', '.join(_missing)}")
+_names = sorted(n for n in os.listdir(_stage) if not n.startswith("."))
+_missing = [n for n in (_installer, "model600.plugin") if n not in _names]
+_unexpected = [n for n in _names if n not in _layout]
+if _missing or _unexpected:
+    # The background is drawn for exactly these items; anything else would sit
+    # outside the visible window or on top of the artwork.
+    raise ValueError(f"stage mismatch: missing {_missing}, unexpected {_unexpected}")
 
-# Everything staged goes in; unknown extras land below the layout, not on top of it.
-files = [os.path.join(_stage, n) for n in sorted(os.listdir(_stage)) if not n.startswith(".")]
-icon_locations = {n: _layout.get(n, (100 + 120 * i, 520)) for i, n in
-                  enumerate(sorted(os.listdir(_stage))) if not n.startswith(".")}
+volume_name = "MODEL 600"     # Window title; same whatever name the caller passes.
+files = [os.path.join(_stage, n) for n in _names]
+icon_locations = {n: _layout[n] for n in _names}
 # No hide_extensions: SetFile -a E stores FinderInfo on the .app bundle
 # itself, which strict signature verification rejects ("detritus").
 
