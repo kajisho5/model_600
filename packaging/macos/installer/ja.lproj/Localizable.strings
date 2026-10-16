@@ -1,0 +1,21 @@
+/* MODEL 600 Installer - 日本語 */
+"confirm.title" = "MODEL 600 をインストールしますか？";
+"confirm.text" = "このユーザーの OBS Studio のプラグインフォルダにインストールします。以前のバージョンは置き換えられます。";
+"install" = "インストール";
+"cancel" = "キャンセル";
+"running.title" = "OBS Studio を終了してください";
+"running.text" = "OBS Studio が起動しているためインストールできません。終了してから［再試行］を押してください。";
+"retry" = "再試行";
+"done.title" = "インストールしました";
+"done.text" = "OBS Studio を起動し、音声ソースの「フィルタ」から MODEL 600 を追加してください。";
+"done" = "完了";
+"openOBS" = "OBS を開く";
+"noOBS.title" = "OBS Studio が見つかりません";
+"noOBS.text" = "MODEL 600 は OBS Studio 31 以降のプラグインです。このままインストールして、あとから OBS Studio を入れることもできます。";
+"continue" = "続ける";
+"fail.title" = "インストールできませんでした";
+"fail.hint" = "README の手動インストール手順をお試しください。";
+"close" = "閉じる";
+"error.notFound" = "model600.plugin が見つかりません。ディスクイメージを開いたまま、もう一度お試しください。";
+"error.signature" = "model600.plugin の署名を確認できませんでした。配布元から入手し直してください。";
+"error.copy" = "コピーできませんでした（%@）。";

@@ -3,6 +3,7 @@
 ## 決定（2026-10-16）
 
 - 採用：**案 A「ダイヤル」**。Windows 用も作成する。DMG 窓（runway 側の変更）は未決のため今回は対象外。
+- DMG 窓とインストーラーの設計は `docs/design/dmg/DMG_DESIGN.md` に移した（承認待ち）。
 - 出荷物（`export_assets.py` で生成）：
   - `resources/macos/model600.icns`：macOS 12〜15 はアイコンを自動でマスクしないため、Apple の macOS 格子（1024 中 824 px の角丸本体）で整形済み。影・光沢は描かない。`CFBundleIconFile` で `.plugin` に入る。
   - `resources/windows/model600.ico`：16/20/24/32/40/48/64/256 px。`model600.rc.in` でアイコンとバージョン情報（会社名・製品名・バージョン・版）を `model600.dll` に埋め込む。
