@@ -34,7 +34,8 @@ if _missing:
 files = [os.path.join(_stage, n) for n in sorted(os.listdir(_stage)) if not n.startswith(".")]
 icon_locations = {n: _layout.get(n, (100 + 120 * i, 520)) for i, n in
                   enumerate(sorted(os.listdir(_stage))) if not n.startswith(".")}
-hide_extensions = [_installer]
+# No hide_extensions: SetFile -a E stores FinderInfo on the .app bundle
+# itself, which strict signature verification rejects ("detritus").
 
 format = "ULFO"           # LZFSE; macOS 10.11+ (the plug-in needs 12+).
 filesystem = "HFS+"

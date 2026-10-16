@@ -277,7 +277,6 @@ jobs:
           done
           tiffutil -info "$mnt/.background.tiff"
           test "$(tiffutil -info "$mnt/.background.tiff" | grep -c 'Image Width')" -ge 2
-          GetFileInfo -aE "$mnt/MODEL 600 Installer.app" | grep -qx 1
           codesign --verify --strict --deep "$mnt/model600.plugin"
           codesign --verify --strict --deep "$mnt/MODEL 600 Installer.app"
           hdiutil detach "$mnt"
