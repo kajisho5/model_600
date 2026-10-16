@@ -1,48 +1,60 @@
-# MODEL 600 — アイコン / DMG 設計（Step 1）
+# MODEL 600 — アイコン / DMG 設計（Step 1・改訂 2：Apple HIG 準拠）
+
+一次情報：Apple Human Interface Guidelines「App icons」
+https://developer.apple.com/design/human-interface-guidelines/app-icons （2026-06-08 改訂版を 2026-10-16 に取得）
 
 ## 1. 対象と現状
 
 | 対象 | 現状 | 作るもの |
 |------|------|----------|
-| `model600.plugin`（Finder 上の表示） | アイコン指定なし（汎用のバンドル表示） | `model600.icns`（16〜1024 px）を `Contents/Resources` に入れ、Info.plist に `CFBundleIconFile` を追加 |
-| 配布 `.dmg` のボリュームアイコン | なし | 同じ図柄の `.VolumeIcon.icns` |
-| `.dmg` を開いたときの窓 | 背景なし（ファイルが並ぶだけ） | 660×400 の背景画像＋「プラグイン → plugins フォルダ」の配置 |
-| Windows `model600.dll` | アイコン・バージョン情報なし | `.ico` とバージョン情報リソース（任意。エクスプローラーのプロパティに出る） |
+| `model600.plugin`（Finder 上の表示） | アイコン指定なし | アイコン（下記 4 の方法で組み込み） |
+| 配布 `.dmg` のボリュームアイコン | なし | 同じ図柄 |
+| `.dmg` を開いたときの窓 | 背景なし | 660×400 の背景＋「プラグイン → plugins フォルダ」配置 |
+| Windows `model600.dll` | なし | `.ico`＋バージョン情報（任意） |
 
 アプリ（`.app`）は存在しない（OBS プラグインのため）。
 
-## 2. 方針
+## 2. HIG の要件と、この案での対応
 
-- GUI v2「実機ハードウェア」と同じ素材感：グラファイトの筐体、ネジ、ブラッシュ仕上げ、アクセントは SEVENTHWELL アンバー `#F0A33A` のみ。
-- macOS のアイコン格子に合わせる：1024 px キャンバス、本体 824 px、角は連続曲線（半径 約 22%）。
-- 16〜32 px で潰れない図柄にする（細かい文字は 64 px 以上でしか読めない前提）。
-- 採用案は Blender でつまみ等を本番レンダリングし、GUI のつまみと同一の質感にする（今回の SVG は図柄の比較用）。
+| HIG（macOS のアプリアイコン） | 対応 |
+|------|------|
+| 1024×1024 の**正方形・角丸なし**のレイヤーを渡す。角丸のマスクはシステムが掛ける（"Providing layers with pre-defined masking negatively impacts specular highlight effects"） | 全レイヤーを 1024 正方形・全面（full-bleed）で作成。角丸は `*_masked` プレビューでのみ再現 |
+| 背景レイヤー＋前景レイヤーで構成し、Icon Composer で組む。前景はベクター（SVG/PDF） | `layers/<案>/` に background / fg1… を SVG で分離 |
+| 背景は単色かグラデーション | 2 色の縦グラデーションのみ |
+| ハイライト・影・ベベル・ブラー・グローを自前で描かない | 一切なし（第 1 版のネジ・影・グロー・ヘアラインを削除） |
+| 単一の概念を最小の形で。極端に細い線・鋭い角を避ける | 形は 3〜4 個、線幅は 60 px 以上、端は丸 |
+| 塗りの重なり＋不透明度差で奥行き | 半透明の円・数字・トラックで奥行き |
+| 文字はブランド/体験に必須な場合のみ | A・C は文字なし。B は製品名「600」のみ（ブランドとして） |
+| UI 部品の複製を避ける | GUI のつまみそのものではなく、図案化した形 |
+| default / dark / clear / tinted を考慮し、核となる要素は全外観で同じ | default・dark・tinted（グレー近似）を `preview/appearances.png` で確認 |
+| 色空間 sRGB / Display P3 | sRGB |
 
-## 3. 案（`svg/`、プレビューは `preview/`）
+## 3. 案（改訂 2）
 
 | 案 | 図柄 | 長所 | 短所 |
 |----|------|------|------|
-| A `icon_a_knob` | 削り出しつまみ＋アンバーの指針＋目盛り＋「600」 | GUI の主役部品と同じ。高級感 | 16 px ではつまみだけになり、他の音響ソフトと似る |
-| B `icon_b_segment` | 凹んだ表示窓にアンバーの 7 セグ「600」＋「MODEL」 | 製品名が小さくても読める。32 px でも「600」と分かる | 機能（音）の連想は弱い |
-| C `icon_c_ladder` | つまみ＋LED レベルメーター | 「自動ミックス」が一目で伝わる | 要素が 2 つで、小サイズでは情報が多い |
+| A `icon_a_dial` | 270° のレベル弧（アンバー）＋つまみの円＋指針 | 「音量を整える」が一目で伝わる。16 px でも形が残る | 速度計・計測アプリと似る可能性 |
+| B `icon_b_600` | アンバー地に製品名「600」（太い幾何学数字、最後の 0 は半透明） | 製品名がそのまま記憶に残る。他の音響ソフトと区別しやすい | 文字中心のため、機能は伝わらない |
+| C `icon_c_mix` | 半透明の円の前に高さの違う 3 本のレベルバー | 「自動ミックス」を表す | 携帯電話の電波強度アイコンと似ており誤認のおそれ |
 
-`preview/sizes_light.png` / `sizes_dark.png` は 256・128・64・32・16 px の比較。
+プレビュー：`preview/appearances.png`（行＝案、列＝default / dark / tinted）、`preview/sizes_light.png`（256〜16 px）。
 
-## 4. DMG 窓（`dmg_window`）
+## 4. 実装方法（承認後）
 
-ヘッダーに製品名、中央に「model600.plugin → plugins（エイリアス）」、下に日英の操作説明。
+1. 採用案のレイヤー SVG を Icon Composer（Xcode 26 同梱、Mac で実行）に読み込み、背景・Liquid Glass・外観変種を設定して `.icon` を書き出す。
+2. ビルドへの組み込み（どちらにするかは CI で検証してから決める）
+   - 第一候補：`actool` で `.icon` をコンパイルし、`Assets.car` と `CFBundleIconName` をバンドルに入れる（Xcode 26 の CI ランナーで実行）
+   - 代替：平坦化した 1024 px PNG から `iconutil` で `.icns` を作り、`CFBundleIconFile` に指定
+3. CI で、`.plugin` の中にアイコンがあり Info.plist が指していることを確認する。
 
-**制約（事実）**：.dmg は `kajisho5/runway` の mac-notarize が `hdiutil create -srcfolder` で作っている。背景画像・アイコン配置・ボリュームアイコン・plugins フォルダへのエイリアスを入れるには、runway 側（mac-notarize）に機能追加が必要。このリポだけでは .dmg の見た目は変えられない。
+## 5. DMG 窓（`dmg_window`）
 
-## 5. 実装（承認後）
+HIG にディスクイメージの窓の規定はない。macOS の慣例（左に本体、右にインストール先フォルダへのエイリアス、矢印、短い説明）に沿う。
 
-1. 採用案を Blender で本番レンダリング → `resources/macos/model600.icns`（`iconutil` で 16〜1024 の 10 サイズ）。
-2. `CMakeLists.txt`：icns をバンドル Resources に追加、Info.plist.in に `CFBundleIconFile`。
-3. CI で `.plugin` 内に icns があり Info.plist が指していることを確認。
-4. DMG 背景・ボリュームアイコン：runway 側の対応可否を決めてから。
-5. Windows `.ico`／バージョン情報：要否を決めてから。
+**制約（事実）**：.dmg は `kajisho5/runway` の mac-notarize が `hdiutil create -srcfolder` で作っている。背景・アイコン配置・ボリュームアイコン・plugins へのエイリアスを入れるには runway 側の機能追加が必要。
 
 ## 6. 未確認
 
-- Finder が `.plugin` バンドルに `CFBundleIconFile` のアイコンを表示するか（Mac 実機で確認が必要）。
-- OBS 自体の画面にプラグインのアイコンが表示される場所は無い見込み（未確認）。
+- `actool` が Makefile ビルド（Xcode プロジェクトなし）から `.icon` を `CFBundle`（.plugin）向けにコンパイルできるか。
+- macOS 26 で、Finder が `.plugin` バンドルのアイコンを表示するか。また旧形式（`.icns`）をどう表示するか。
+- 正確な角丸形状（プレビューは半径 22.37% の近似）。Apple Design Resources のテンプレートで最終確認する。

@@ -1,223 +1,175 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  MODEL 600 // BROADCAST SUITE  -  icon design proposals (Step 2 samples).
-#  Writes 1024x1024 SVGs (macOS icon grid: 824 px body, 100 px margin,
-#  continuous-corner rounded square) plus a DMG window mock, using the GUI
-#  palette from docs/design/DESIGN_SPEC.md.
-#    python3 docs/design/icon/make_icons.py   ->  docs/design/icon/svg/*.svg
+#  MODEL 600 // BROADCAST SUITE  -  icon proposals, revision 2 (Apple HIG).
+#
+#  Follows https://developer.apple.com/design/human-interface-guidelines/app-icons
+#  (macOS): 1024x1024 SQUARE, UNMASKED, full-bleed layers (the system applies the
+#  rounded corners and Liquid Glass); a solid/gradient background layer plus a
+#  few filled foreground layers; no drop shadows, glows, bevels, highlights,
+#  blurs or textures; no thin lines; no text unless it is the brand; no copy of
+#  UI components.
+#
+#  Output (docs/design/icon/):
+#    layers/<concept>/{background,fg1,fg2,...}.svg   Icon Composer inputs
+#    svg/<concept>.svg                               flattened full-bleed square
+#    svg/<concept>_<appearance>_masked.svg           preview with the system mask
+#    svg/dmg_window.svg                              DMG window mock
+#  Appearances previewed: default, dark, tinted (gray). The dark / tinted ones
+#  here are approximations; Icon Composer produces the real variants.
 # =============================================================================
 import math
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "svg")
+LAYERS = os.path.join(HERE, "layers")
 FONTS = os.path.normpath(os.path.join(HERE, "..", "..", "..", "resources", "fonts"))
 
-C = dict(chassis="#0E1012", face="#191C20", panel="#121417", raised="#23272C", line="#2C3137",
-         line2="#3A4047", t1="#E7E9EC", t2="#9AA1A9", t3="#646B73", amber="#F0A33A",
-         green="#46C17B", yellow="#E2BF4E", red="#E5534B", off="#1E2226")
+S = 1024                           # Canvas = layer size (full bleed).
+MASK_R = 0.2237 * S                # Preview only: approximate system corner radius.
 
-FONT_CSS = f"""<style>
-@font-face {{ font-family: Inter; font-weight: 600; src: url('file://{FONTS}/Inter-SemiBold.otf'); }}
-@font-face {{ font-family: Inter; font-weight: 700; src: url('file://{FONTS}/Inter-Bold.otf'); }}
-@font-face {{ font-family: Inter; font-weight: 500; src: url('file://{FONTS}/Inter-Medium.otf'); }}
-@font-face {{ font-family: NotoJP; src: url('file://{FONTS}/NotoSansJP-Subset-Regular.otf'); }}
-</style>"""
-
-BODY = (100, 100, 824, 824)        # x, y, w, h of the icon body on the 1024 grid
-R = 185                            # corner radius (~22.4 % of 824)
+AMBER = "#F0A33A"
+AMBER_D = "#C9771A"
+GRAPH_T, GRAPH_B = "#2B3038", "#14171B"      # Default background gradient.
+DARK_T, DARK_B = "#1A1D21", "#0B0C0E"        # Dark appearance background.
+ALU = "#D3D7DC"
+GREEN = "#46C17B"
 
 
-def squircle(x, y, w, h, r):
-    # Continuous-corner approximation: cubic corners with 0.55 * r handles stretched.
-    k = 0.62 * r
-    return (f"M{x+r},{y} H{x+w-r} C{x+w-r+k},{y} {x+w},{y+r-k} {x+w},{y+r} "
-            f"V{y+h-r} C{x+w},{y+h-r+k} {x+w-r+k},{y+h} {x+w-r},{y+h} "
-            f"H{x+r} C{x+r-k},{y+h} {x},{y+h-r+k} {x},{y+h-r} "
-            f"V{y+r} C{x},{y+r-k} {x+r-k},{y} {x+r},{y} Z")
+def grad_bg(top, bottom):
+    return f"""<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient></defs>
+<rect width="{S}" height="{S}" fill="url(#bg)"/>"""
 
 
-def defs_common():
-    return f"""
-  <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#2A2E34"/><stop offset="0.5" stop-color="{C['face']}"/>
-    <stop offset="1" stop-color="#121417"/>
-  </linearGradient>
-  <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#4A5058"/><stop offset="1" stop-color="#15181B"/>
-  </linearGradient>
-  <filter id="drop" x="-20%" y="-20%" width="140%" height="150%">
-    <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.45"/>
-  </filter>
-  <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-    <feGaussianBlur stdDeviation="10" result="b"/>
-    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-  </filter>
-  <pattern id="brush" width="1024" height="6" patternUnits="userSpaceOnUse">
-    <rect width="1024" height="6" fill="none"/>
-    <rect y="0" width="1024" height="1" fill="#ffffff" opacity="0.025"/>
-    <rect y="3" width="1024" height="1" fill="#000000" opacity="0.05"/>
-  </pattern>"""
+def arc_path(cx, cy, r, a0, a1):
+    """Arc from angle a0 to a1 (degrees, 0 = up, clockwise)."""
+    def pt(a):
+        t = math.radians(a - 90)
+        return cx + r * math.cos(t), cy + r * math.sin(t)
+    x0, y0 = pt(a0)
+    x1, y1 = pt(a1)
+    large = 1 if (a1 - a0) % 360 > 180 else 0
+    return f"M{x0:.1f},{y0:.1f} A{r},{r} 0 {large} 1 {x1:.1f},{y1:.1f}"
 
 
-def plate():
-    x, y, w, h = BODY
-    p = squircle(x, y, w, h, R)
-    inner = squircle(x + 6, y + 6, w - 12, h - 12, R - 6)
-    return f"""
-  <g filter="url(#drop)"><path d="{p}" fill="url(#rim)"/></g>
-  <path d="{inner}" fill="url(#plate)"/>
-  <path d="{inner}" fill="url(#brush)"/>
-  <path d="{inner}" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2"/>"""
+# ---------------------------------------------------------------------------
+# Concept A — "Dial": a level arc around a solid control disc with an amber
+# pointer. One idea (turn it up), three filled shapes, no text.
+# ---------------------------------------------------------------------------
+def concept_a(app):
+    bg = grad_bg(*(GRAPH_T, GRAPH_B) if app != "dark" else (DARK_T, DARK_B))
+    cx, cy = 512, 520
+    track = f'<path d="{arc_path(cx, cy, 318, -135, 135)}" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="76" stroke-linecap="round"/>'
+    level = f'<path d="{arc_path(cx, cy, 318, -135, 52)}" fill="none" stroke="{AMBER}" stroke-width="76" stroke-linecap="round"/>'
+    disc = f'<circle cx="{cx}" cy="{cy}" r="196" fill="{ALU if app != "dark" else "#9EA4AB"}"/>'
+    t = math.radians(52 - 90)
+    px, py = cx + 118 * math.cos(t), cy + 118 * math.sin(t)
+    qx, qy = cx + 36 * math.cos(t), cy + 36 * math.sin(t)
+    pointer = f'<line x1="{qx:.1f}" y1="{qy:.1f}" x2="{px:.1f}" y2="{py:.1f}" stroke="{AMBER}" stroke-width="60" stroke-linecap="round"/>'
+    return {"background": bg, "fg1_track": track, "fg2_level": level, "fg3_disc": disc, "fg4_pointer": pointer}
 
 
-def screws():
-    out = []
-    for sx, sy in ((178, 178), (846, 178), (178, 846), (846, 846)):
-        out.append(f"""
-  <circle cx="{sx}" cy="{sy}" r="20" fill="#2E333A" stroke="#0B0D0F" stroke-width="3"/>
-  <path d="M{sx-11},{sy-6} L{sx+11},{sy+6}" stroke="#0B0D0F" stroke-width="5" stroke-linecap="round"/>""")
-    return "".join(out)
+# ---------------------------------------------------------------------------
+# Concept B — "600": the model number as the brand mark, drawn from thick
+# geometric shapes (text is part of the product name, the one case HIG allows).
+# ---------------------------------------------------------------------------
+def concept_b(app):
+    if app == "dark":
+        bg = grad_bg("#3A2A12", "#1E160A")
+        ink, ink2 = AMBER, "#B9781F"
+    else:
+        bg = grad_bg("#F6B24E", AMBER_D)
+        ink, ink2 = "#16191C", "#16191C"
+    w = 64                                     # Stroke weight of the numerals.
+    # Drawn around a local origin (x -152..674, y -302..152), scaled 0.82 and centred.
+    g = 'transform="translate(298,573) scale(0.82)"'
+    # "6": round bowl + one stroke rising to the upper right.
+    six = (f'<g {g}><circle cx="0" cy="0" r="120" fill="none" stroke="{ink}" stroke-width="{w}"/>'
+           f'<path d="M-120,0 C-120,-150 -40,-250 70,-270" fill="none" stroke="{ink}" stroke-width="{w}" stroke-linecap="round"/></g>')
+    # "0" "0": stadiums on the same baseline; the second is translucent for depth.
+    zero1 = f'<g {g}><rect x="214" y="-270" width="172" height="390" rx="86" fill="none" stroke="{ink}" stroke-width="{w}"/></g>'
+    zero2 = f'<g {g}><rect x="470" y="-270" width="172" height="390" rx="86" fill="none" stroke="{ink2}" stroke-opacity="0.55" stroke-width="{w}"/></g>'
+    return {"background": bg, "fg1_six": six, "fg2_zero": zero1, "fg3_zero_translucent": zero2}
 
 
-def knob(cx, cy, r, angle_deg, ticks=True):
-    a = math.radians(angle_deg - 90)
-    px, py = cx + math.cos(a) * r * 0.78, cy + math.sin(a) * r * 0.78
-    qx, qy = cx + math.cos(a) * r * 0.42, cy + math.sin(a) * r * 0.42
-    knurl = []
-    for i in range(60):
-        t = math.radians(i * 6)
-        x1, y1 = cx + math.cos(t) * (r - 2), cy + math.sin(t) * (r - 2)
-        x2, y2 = cx + math.cos(t) * (r - 16), cy + math.sin(t) * (r - 16)
-        knurl.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#0E1012" stroke-opacity="0.55" stroke-width="3"/>')
-    scale = []
-    if ticks:
-        for i in range(11):
-            t = math.radians(-135 + i * 27 - 90)
-            ro, ri = r + 58, r + (34 if i % 5 else 24)
-            col = C['amber'] if i <= round((angle_deg + 135) / 27) else C['t3']
-            scale.append(f'<line x1="{cx+math.cos(t)*ri:.1f}" y1="{cy+math.sin(t)*ri:.1f}" x2="{cx+math.cos(t)*ro:.1f}" y2="{cy+math.sin(t)*ro:.1f}" stroke="{col}" stroke-width="10" stroke-linecap="round"/>')
-    return f"""
-  <defs>
-    <radialGradient id="cap{cx}" cx="0.38" cy="0.32" r="0.8">
-      <stop offset="0" stop-color="#C9CDD2"/><stop offset="0.35" stop-color="#8A9097"/>
-      <stop offset="0.75" stop-color="#4A5057"/><stop offset="1" stop-color="#2A2E33"/>
-    </radialGradient>
-    <radialGradient id="face{cx}" cx="0.4" cy="0.35" r="0.75">
-      <stop offset="0" stop-color="#3A3F46"/><stop offset="1" stop-color="#16191C"/>
-    </radialGradient>
-  </defs>
-  {''.join(scale)}
-  <circle cx="{cx}" cy="{cy+10}" r="{r+6}" fill="#000" opacity="0.45" filter="url(#drop)"/>
-  <circle cx="{cx}" cy="{cy}" r="{r}" fill="url(#cap{cx})"/>
-  {''.join(knurl)}
-  <circle cx="{cx}" cy="{cy}" r="{r*0.72:.1f}" fill="url(#face{cx})" stroke="#0B0D0F" stroke-width="3"/>
-  <circle cx="{cx}" cy="{cy}" r="{r*0.72:.1f}" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
-  <line x1="{qx:.1f}" y1="{qy:.1f}" x2="{px:.1f}" y2="{py:.1f}" stroke="{C['amber']}" stroke-width="16" stroke-linecap="round" filter="url(#glow)"/>"""
+# ---------------------------------------------------------------------------
+# Concept C — "Mix": three rounded level bars of different heights in front
+# of a translucent disc — several sources balanced into one mix.
+# ---------------------------------------------------------------------------
+def concept_c(app):
+    bg = grad_bg(*(GRAPH_T, GRAPH_B) if app != "dark" else (DARK_T, DARK_B))
+    disc = '<circle cx="512" cy="512" r="330" fill="#FFFFFF" fill-opacity="0.10"/>'
+    bars = []
+    for x, h, col in ((334, 300, GREEN), (472, 420, GREEN), (610, 520, AMBER)):
+        bars.append(f'<rect x="{x}" y="{742 - h}" width="96" height="{h}" rx="48" fill="{col}"/>')
+    return {"background": bg, "fg1_disc": disc, "fg2_bars": "".join(bars)}
 
 
-SEG = {  # 7-segment glyphs: a b c d e f g
-    "6": "acdefg", "0": "abcdef", "8": "abcdefg",
-}
+CONCEPTS = {"icon_a_dial": concept_a, "icon_b_600": concept_b, "icon_c_mix": concept_c}
 
 
-def seg_digit(x, y, w, h, ch, on, off, th=None):
-    th = th or w * 0.2
-    g = th * 0.18
-    segs = {
-        "a": (x + th / 2 + g, y, x + w - th / 2 - g, y),
-        "d": (x + th / 2 + g, y + h, x + w - th / 2 - g, y + h),
-        "g": (x + th / 2 + g, y + h / 2, x + w - th / 2 - g, y + h / 2),
-        "f": (x, y + th / 2 + g, x, y + h / 2 - th / 2 - g),
-        "e": (x, y + h / 2 + th / 2 + g, x, y + h - th / 2 - g),
-        "b": (x + w, y + th / 2 + g, x + w, y + h / 2 - th / 2 - g),
-        "c": (x + w, y + h / 2 + th / 2 + g, x + w, y + h - th / 2 - g),
-    }
-    out = []
-    for name, (x1, y1, x2, y2) in segs.items():
-        col = on if name in SEG[ch] else off
-        out.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="{col}" stroke-width="{th:.1f}" stroke-linecap="round"/>')
-    return "".join(out)
+def doc(inner, w=S, h=S, extra=""):
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">{extra}{inner}</svg>\n'
 
 
-def svg(body, w=1024, h=1024, extra_defs=""):
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
-{FONT_CSS}
-<defs>{defs_common()}{extra_defs}</defs>
-{body}
-</svg>
-"""
+TINT = """<defs><filter id="gray"><feColorMatrix type="saturate" values="0"/></filter></defs>"""
 
 
-def icon_a():
-    # A: machined knob — the hardware console's signature part.
-    body = plate() + screws() + knob(512, 470, 205, 62) + f"""
-  <text x="512" y="842" text-anchor="middle" font-family="Inter, NotoJP" font-weight="700" font-size="74"
-        letter-spacing="10" fill="{C['t1']}">600</text>"""
-    return svg(body)
-
-
-def icon_b():
-    # B: amber 7-segment "600" in a recessed display window.
-    x0, y0, dw, dh = 214, 330, 596, 300
-    digits = "".join(seg_digit(x0 + 64 + i * 170, y0 + 62, 112, 176, ch, C['amber'], "#2A2418", th=26)
-                     for i, ch in enumerate("600"))
-    body = plate() + screws() + f"""
-  <rect x="{x0}" y="{y0}" width="{dw}" height="{dh}" rx="34" fill="#070809" stroke="#000" stroke-width="4"/>
-  <rect x="{x0+4}" y="{y0+4}" width="{dw-8}" height="{dh-8}" rx="30" fill="none" stroke="#ffffff" stroke-opacity="0.05" stroke-width="3"/>
-  <g filter="url(#glow)">{digits}</g>
-  <text x="512" y="752" text-anchor="middle" font-family="Inter, NotoJP" font-weight="600" font-size="58"
-        letter-spacing="18" fill="{C['t2']}">MODEL</text>"""
-    return svg(body)
-
-
-def icon_c():
-    # C: knob + LED level ladder — "auto-mixing" read at a glance.
-    leds = []
-    n = 9
-    for i in range(n):
-        y = 720 - i * 58
-        col = C['green'] if i < 5 else C['yellow'] if i < 7 else C['red']
-        lit = i < 7
-        fill = col if lit else C['off']
-        glow = ' filter="url(#glow)"' if lit else ""
-        leds.append(f'<rect x="676" y="{y}" width="120" height="40" rx="10" fill="{fill}"{glow}/>')
-    body = plate() + screws() + knob(400, 512, 168, 30, ticks=False) + f"""
-  <rect x="656" y="220" width="160" height="560" rx="26" fill="#070809" stroke="#000" stroke-width="4"/>
-  {''.join(leds)}"""
-    return svg(body)
+def masked(inner, app):
+    # Preview only: the system mask (rounded square). Tinted = grayscale approximation.
+    body = f'<g filter="url(#gray)">{inner}</g>' if app == "tinted" else inner
+    return doc(f'<defs><clipPath id="m"><rect width="{S}" height="{S}" rx="{MASK_R:.0f}"/></clipPath></defs>'
+               f'<g clip-path="url(#m)">{body}</g>', extra=TINT if app == "tinted" else "")
 
 
 def dmg_window():
-    # DMG Finder window background (660 x 400 pt). Volume shows the plug-in
-    # on the left and an alias to the OBS plugins folder on the right.
     w, h = 660, 400
+    css = f"""<style>
+@font-face {{ font-family: Inter; font-weight: 700; src: url('file://{FONTS}/Inter-Bold.otf'); }}
+@font-face {{ font-family: Inter; font-weight: 600; src: url('file://{FONTS}/Inter-SemiBold.otf'); }}
+@font-face {{ font-family: Inter; font-weight: 500; src: url('file://{FONTS}/Inter-Medium.otf'); }}
+@font-face {{ font-family: NotoJP; src: url('file://{FONTS}/NotoSansJP-Subset-Regular.otf'); }}
+</style>"""
     body = f"""
-  <rect width="{w}" height="{h}" fill="{C['face']}"/>
-  <rect width="{w}" height="{h}" fill="url(#brush)"/>
-  <rect x="0" y="0" width="{w}" height="64" fill="{C['chassis']}"/>
-  <text x="32" y="41" font-family="Inter, NotoJP" font-weight="700" font-size="20" letter-spacing="3" fill="{C['t1']}">MODEL 600</text>
-  <text x="196" y="41" font-family="Inter, NotoJP" font-weight="500" font-size="14" letter-spacing="2" fill="{C['t3']}">// BROADCAST SUITE</text>
-  <text x="{w-32}" y="41" text-anchor="end" font-family="Inter, NotoJP" font-weight="600" font-size="12" letter-spacing="3" fill="{C['amber']}">SEVENTHWELL</text>
-  <!-- icon slots (Finder draws the real icons here) -->
-  <rect x="120" y="128" width="128" height="128" rx="28" fill="none" stroke="{C['line2']}" stroke-dasharray="6 6"/>
-  <text x="184" y="198" text-anchor="middle" font-family="Inter, NotoJP" font-size="12" fill="{C['t3']}">model600.plugin</text>
-  <rect x="412" y="128" width="128" height="128" rx="28" fill="none" stroke="{C['line2']}" stroke-dasharray="6 6"/>
-  <text x="476" y="198" text-anchor="middle" font-family="Inter, NotoJP" font-size="12" fill="{C['t3']}">plugins (alias)</text>
-  <path d="M276,192 H372" stroke="{C['amber']}" stroke-width="4" stroke-linecap="round"/>
-  <path d="M360,180 L376,192 L360,204" fill="none" stroke="{C['amber']}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="{w/2}" y="318" text-anchor="middle" font-family="Inter, NotoJP" font-weight="500" font-size="14" fill="{C['t2']}">model600.plugin を右のフォルダへドラッグ → OBS を再起動</text>
-  <text x="{w/2}" y="342" text-anchor="middle" font-family="Inter, NotoJP" font-weight="500" font-size="12" fill="{C['t3']}">Drag model600.plugin onto the folder, then restart OBS Studio</text>"""
-    return svg(body, w, h)
+  <rect width="{w}" height="{h}" fill="#191C20"/>
+  <rect width="{w}" height="64" fill="#0E1012"/>
+  <text x="32" y="41" font-family="Inter, NotoJP" font-weight="700" font-size="20" letter-spacing="3" fill="#E7E9EC">MODEL 600</text>
+  <text x="196" y="41" font-family="Inter, NotoJP" font-weight="500" font-size="14" letter-spacing="2" fill="#646B73">// BROADCAST SUITE</text>
+  <text x="{w-32}" y="41" text-anchor="end" font-family="Inter, NotoJP" font-weight="600" font-size="12" letter-spacing="3" fill="{AMBER}">SEVENTHWELL</text>
+  <rect x="120" y="128" width="128" height="128" rx="28" fill="none" stroke="#3A4047" stroke-dasharray="6 6"/>
+  <text x="184" y="198" text-anchor="middle" font-family="Inter, NotoJP" font-size="12" fill="#646B73">model600.plugin</text>
+  <rect x="412" y="128" width="128" height="128" rx="28" fill="none" stroke="#3A4047" stroke-dasharray="6 6"/>
+  <text x="476" y="198" text-anchor="middle" font-family="Inter, NotoJP" font-size="12" fill="#646B73">plugins (alias)</text>
+  <path d="M276,192 H372" stroke="{AMBER}" stroke-width="4" stroke-linecap="round"/>
+  <path d="M360,180 L376,192 L360,204" fill="none" stroke="{AMBER}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="{w/2}" y="318" text-anchor="middle" font-family="Inter, NotoJP" font-weight="500" font-size="14" fill="#9AA1A9">model600.plugin を右のフォルダへドラッグ → OBS を再起動</text>
+  <text x="{w/2}" y="342" text-anchor="middle" font-family="Inter, NotoJP" font-weight="500" font-size="12" fill="#646B73">Drag model600.plugin onto the folder, then restart OBS Studio</text>"""
+    return doc(body, w, h, css)
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    for name, fn in (("icon_a_knob", icon_a), ("icon_b_segment", icon_b), ("icon_c_ladder", icon_c),
-                     ("dmg_window", dmg_window)):
+    for f in os.listdir(OUT):
+        os.remove(os.path.join(OUT, f))
+    for name, fn in CONCEPTS.items():
+        layers = fn("default")
+        ldir = os.path.join(LAYERS, name)
+        os.makedirs(ldir, exist_ok=True)
+        for lname, content in layers.items():
+            with open(os.path.join(ldir, f"{lname}.svg"), "w") as f:
+                f.write(doc(content))
+        flat = "".join(layers.values())
         with open(os.path.join(OUT, f"{name}.svg"), "w") as f:
-            f.write(fn())
+            f.write(doc(flat))
+        for app in ("default", "dark", "tinted"):
+            src = "".join((fn("dark") if app == "dark" else layers).values())
+            with open(os.path.join(OUT, f"{name}_{app}_masked.svg"), "w") as f:
+                f.write(masked(src, app))
         print("wrote", name)
+    with open(os.path.join(OUT, "dmg_window.svg"), "w") as f:
+        f.write(dmg_window())
+    print("wrote dmg_window")
 
 
 if __name__ == "__main__":
