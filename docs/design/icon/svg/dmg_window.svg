@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="400" viewBox="0 0 660 400"><style>
+@font-face { font-family: Inter; font-weight: 700; src: url('file:///home/user/model_600/resources/fonts/Inter-Bold.otf'); }
+@font-face { font-family: Inter; font-weight: 600; src: url('file:///home/user/model_600/resources/fonts/Inter-SemiBold.otf'); }
+@font-face { font-family: Inter; font-weight: 500; src: url('file:///home/user/model_600/resources/fonts/Inter-Medium.otf'); }
+@font-face { font-family: NotoJP; src: url('file:///home/user/model_600/resources/fonts/NotoSansJP-Subset-Regular.otf'); }
+</style>
+  <rect width="660" height="400" fill="#191C20"/>
+  <rect width="660" height="64" fill="#0E1012"/>
+  <text x="32" y="41" font-family="Inter, NotoJP" font-weight="700" font-size="20" letter-spacing="3" fill="#E7E9EC">MODEL 600</text>
+  <text x="196" y="41" font-family="Inter, NotoJP" font-weight="500" font-size="14" letter-spacing="2" fill="#646B73">// BROADCAST SUITE</text>
+  <text x="628" y="41" text-anchor="end" font-family="Inter, NotoJP" font-weight="600" font-size="12" letter-spacing="3" fill="#F0A33A">SEVENTHWELL</text>
+  <rect x="120" y="128" width="128" height="128" rx="28" fill="none" stroke="#3A4047" stroke-dasharray="6 6"/>
+  <text x="184" y="198" text-anchor="middle" font-family="Inter, NotoJP" font-size="12" fill="#646B73">model600.plugin</text>
+  <rect x="412" y="128" width="128" height="128" rx="28" fill="none" stroke="#3A4047" stroke-dasharray="6 6"/>
+  <text x="476" y="198" text-anchor="middle" font-family="Inter, NotoJP" font-size="12" fill="#646B73">plugins (alias)</text>
+  <path d="M276,192 H372" stroke="#F0A33A" stroke-width="4" stroke-linecap="round"/>
+  <path d="M360,180 L376,192 L360,204" fill="none" stroke="#F0A33A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="330.0" y="318" text-anchor="middle" font-family="Inter, NotoJP" font-weight="500" font-size="14" fill="#9AA1A9">model600.plugin を右のフォルダへドラッグ → OBS を再起動</text>
+  <text x="330.0" y="342" text-anchor="middle" font-family="Inter, NotoJP" font-weight="500" font-size="12" fill="#646B73">Drag model600.plugin onto the folder, then restart OBS Studio</text></svg>
