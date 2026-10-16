@@ -21,3 +21,4 @@ keys_*.csv
 .idea/
 *.user
 compile_commands.json
+__pycache__/
