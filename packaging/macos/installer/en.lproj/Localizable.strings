@@ -1,0 +1,21 @@
+/* MODEL 600 Installer - English */
+"confirm.title" = "Install MODEL 600?";
+"confirm.text" = "MODEL 600 will be installed in this user's OBS Studio plug-ins folder. An earlier version is replaced.";
+"install" = "Install";
+"cancel" = "Cancel";
+"running.title" = "Quit OBS Studio to continue";
+"running.text" = "MODEL 600 can't be installed while OBS Studio is open. Quit OBS Studio, then click Try Again.";
+"retry" = "Try Again";
+"done.title" = "MODEL 600 is installed";
+"done.text" = "Open OBS Studio and add MODEL 600 from an audio source's Filters.";
+"done" = "Done";
+"openOBS" = "Open OBS";
+"noOBS.title" = "OBS Studio wasn't found";
+"noOBS.text" = "MODEL 600 is a plug-in for OBS Studio 31 or later. You can install it now and install OBS Studio later.";
+"continue" = "Continue";
+"fail.title" = "MODEL 600 couldn't be installed";
+"fail.hint" = "Try the manual steps in README.";
+"close" = "Close";
+"error.notFound" = "model600.plugin wasn't found. Keep the disk image open and try again.";
+"error.signature" = "The signature of model600.plugin couldn't be verified. Download MODEL 600 again from the official source.";
+"error.copy" = "The plug-in couldn't be copied (%@).";

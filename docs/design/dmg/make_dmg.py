@@ -25,7 +25,8 @@ import make_icons as mi  # noqa: E402  (concept A artwork, squircle, arc_path)
 
 OUT = os.path.join(HERE, "svg")
 FONTS = mi.FONTS
-W, H = 660, 400                     # Finder window content size (pt).
+W, H = 660, 420                     # Background image size (pt). The window shows about
+                                    # the top 400 pt; the extra footer covers title-bar slack.
 HEAD_H, BAND_B = 64, 350            # Header bottom, label band bottom.
 ICON = 96                           # dmgbuild icon_size (pt).
 
@@ -127,8 +128,8 @@ def frame():
             + t(32, 41, "MODEL 600", 20, "#E7E9EC", 700, ls=3)
             + t(196, 41, "// BROADCAST SUITE", 14, "#8A9199", 500, ls=2)
             + t(W - 32, 41, "SEVENTHWELL", 12, AMBER, 600, "end", ls=3)
-            + t(W / 2, 372, "macOS 12 以降（Apple シリコン / Intel）・ OBS Studio 31 以降", 11.5, FOOT_TXT, 500, "middle")
-            + t(W / 2, 390, "macOS 12 or later (Apple silicon / Intel) · OBS Studio 31 or later", 11, FOOT_TXT2, 400, "middle"))
+            + t(W / 2, 368, "macOS 12 以降（Apple シリコン / Intel）・ OBS Studio 31 以降", 11.5, FOOT_TXT, 500, "middle")
+            + t(W / 2, 385, "macOS 12 or later (Apple silicon / Intel) · OBS Studio 31 or later", 11, FOOT_TXT2, 400, "middle"))
 
 
 # --------------------------------------------------------------------------- backgrounds

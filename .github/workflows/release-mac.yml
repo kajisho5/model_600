@@ -2,7 +2,7 @@
 # 実行：Actions → release-mac → Run workflow（iPhone の GitHub アプリからも可）、または v1.0.0 などのタグを push
 # 公証済みの .dmg は実行結果の Artifacts からダウンロードする。
 # ビルド：tools/ci/build_macos_release.sh（OBS 31.1.1 SDK → Pro 版、Universal2、macOS 12 以上）
-#   → dist-mac/model600.plugin を runway が Developer ID で署名し直す。同じビルドは build.yml の
+#   → dist-mac/model600.plugin と dist-mac/MODEL 600 Installer.app を runway が Developer ID で署名し直す。同じビルドは build.yml の
 #   macos-release ジョブ（Xcode 26）で PR ごとに確認している。
 # ※ 現状このリポ（public）からは runway（private）の再利用ワークフローを呼べない（GitHub の仕様）。
 #    runway の Actions → mac-release を使う（手順は CLAUDE.md）。
@@ -20,9 +20,12 @@ jobs:
   mac:
     uses: kajisho5/runway/.github/workflows/mac-notarize.yml@main
     with:
-      name: model_600
+      name: MODEL600
       build: bash tools/ci/build_macos_release.sh
       products: |
         dist-mac/model600.plugin
+        dist-mac/MODEL 600 Installer.app
       readme: packaging/macos/README.txt
+      # runway の mac-notarize に dmg_settings が入ったら有効にする（docs/RUNWAY_CHANGES.md）
+      # dmg_settings: packaging/macos/dmg/settings.py
     secrets: inherit

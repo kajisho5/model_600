@@ -234,6 +234,58 @@ jobs:
 
       - name: Sign like runway (ad-hoc stand-in)
         run: |
-          codesign --force --timestamp=none --options runtime --sign - dist-mac/model600.plugin
-          codesign --verify --strict --deep --verbose=2 dist-mac/model600.plugin
+          for p in dist-mac/model600.plugin "dist-mac/MODEL 600 Installer.app"; do
+            codesign --force --timestamp=none --options runtime --sign - "$p"
+            codesign --verify --strict --deep --verbose=2 "$p"
+          done
           codesign -dvv dist-mac/model600.plugin 2>&1 | grep -E "flags|Format"
+
+      - name: Installer (headless install, replace, tampered plug-in refused)
+        run: |
+          set -euo pipefail
+          exe="dist-mac/MODEL 600 Installer.app/Contents/MacOS/MODEL 600 Installer"
+          dest="$RUNNER_TEMP/plugins"
+          "$exe" --headless --dest "$dest"
+          codesign --verify --strict --deep "$dest/model600.plugin"
+          cmp "$dest/model600.plugin/Contents/MacOS/model600" dist-mac/model600.plugin/Contents/MacOS/model600
+          "$exe" --headless --dest "$dest"
+          test "$(ls -A "$dest")" = "model600.plugin"
+          t="$RUNNER_TEMP/tamper"; mkdir -p "$t"
+          cp -R "dist-mac/MODEL 600 Installer.app" dist-mac/model600.plugin "$t/"
+          echo tampered >> "$t/model600.plugin/Contents/Resources/THIRD_PARTY_NOTICES.md"
+          if "$t/MODEL 600 Installer.app/Contents/MacOS/MODEL 600 Installer" --headless --dest "$RUNNER_TEMP/tamper-dest"; then
+            echo "::error::a modified plug-in was installed"; exit 1
+          fi
+          test ! -e "$RUNNER_TEMP/tamper-dest/model600.plugin"
+
+      - name: DMG layout (dmgbuild, unsigned preview image)
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/dmgenv"
+          "$RUNNER_TEMP/dmgenv/bin/pip" install -q -r packaging/macos/dmg/requirements.txt
+          stage="$RUNNER_TEMP/stage/MODEL600"; mkdir -p "$stage"
+          cp -R dist-mac/model600.plugin "dist-mac/MODEL 600 Installer.app" "$stage/"
+          cp packaging/macos/README.txt "$stage/"
+          ver=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist-mac/model600.plugin/Contents/Info.plist)
+          out="$RUNNER_TEMP/MODEL600-$ver-unsigned.dmg"
+          "$RUNNER_TEMP/dmgenv/bin/dmgbuild" -s packaging/macos/dmg/settings.py -D stage="$stage" "MODEL 600" "$out"
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$out"
+          ls -la "$mnt"
+          for f in .DS_Store .background.tiff .VolumeIcon.icns "MODEL 600 Installer.app" model600.plugin README.txt; do
+            test -e "$mnt/$f" || { echo "::error::missing in dmg: $f"; exit 1; }
+          done
+          tiffutil -info "$mnt/.background.tiff"
+          test "$(tiffutil -info "$mnt/.background.tiff" | grep -c 'Image Width')" -ge 2
+          GetFileInfo -aE "$mnt/MODEL 600 Installer.app" | grep -qx 1
+          codesign --verify --strict --deep "$mnt/model600.plugin"
+          codesign --verify --strict --deep "$mnt/MODEL 600 Installer.app"
+          hdiutil detach "$mnt"
+          echo "DMG_PREVIEW=$out" >> "$GITHUB_ENV"
+
+      - name: Upload DMG layout preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: MODEL600-dmg-layout-unsigned
+          path: ${{ env.DMG_PREVIEW }}
+          retention-days: 14

@@ -3,10 +3,13 @@
 #  MODEL 600 // BROADCAST SUITE  -  SEVENTHWELL
 #  tools/ci/build_macos_release.sh - macOS release build for signing.
 #
-#  Produces dist-mac/model600.plugin (Pro edition, Universal2, macOS 12+),
-#  unsigned apart from the linker's ad-hoc signature. kajisho5/runway's
-#  mac-notarize re-signs it with Developer ID (--force, hardened runtime,
-#  timestamp), notarizes and staples the .dmg. No signing settings here.
+#  Produces, unsigned apart from the linker's ad-hoc signature:
+#    dist-mac/model600.plugin           Pro edition, Universal2, macOS 12+
+#    dist-mac/MODEL 600 Installer.app   copies the plug-in into the OBS
+#                                       plug-ins folder (Swift, Universal2)
+#  kajisho5/runway's mac-notarize re-signs both with Developer ID (--force,
+#  hardened runtime, timestamp), notarizes and staples the .dmg. The .dmg
+#  window layout is packaging/macos/dmg/settings.py. No signing settings here.
 #
 #    bash tools/ci/build_macos_release.sh
 #
@@ -47,3 +50,32 @@ test -f "$dist/model600.plugin/Contents/Info.plist"
 test -f "$dist/model600.plugin/Contents/Resources/ggml-base-q5_1.bin"
 test -f "$dist/model600.plugin/Contents/Resources/THIRD_PARTY_NOTICES.md"
 echo "ready: $dist/model600.plugin"
+
+# 4. MODEL 600 Installer.app (same version as the plug-in).
+src="$root/packaging/macos/installer"
+app="$dist/MODEL 600 Installer.app"
+exe="$app/Contents/MacOS/MODEL 600 Installer"
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$dist/model600.plugin/Contents/Info.plist")"
+sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+for arch in arm64 x86_64; do
+    xcrun swiftc -O -parse-as-library -warnings-as-errors \
+        -target "$arch-apple-macos12.0" -sdk "$sdk_path" \
+        "$src/Installer.swift" -o "$tmp/installer-$arch"
+done
+lipo -create "$tmp/installer-arm64" "$tmp/installer-x86_64" -output "$exe"
+sed -e "s/@VERSION@/$version/g" -e "s/@YEAR@/$(date +%Y)/g" "$src/Info.plist.in" > "$app/Contents/Info.plist"
+cp "$src/installer.icns" "$app/Contents/Resources/installer.icns"
+for lang in en ja; do
+    mkdir -p "$app/Contents/Resources/$lang.lproj"
+    cp "$src/$lang.lproj/Localizable.strings" "$app/Contents/Resources/$lang.lproj/"
+    plutil -lint "$app/Contents/Resources/$lang.lproj/Localizable.strings"
+done
+plutil -lint "$app/Contents/Info.plist"
+lipo "$exe" -verify_arch arm64 x86_64
+# swiftc's linker signs ad-hoc per arch; lipo drops it. Re-sign the bundle
+# ad-hoc so it runs locally (runway replaces this with Developer ID).
+codesign --force --sign - "$app"
+echo "ready: $app"

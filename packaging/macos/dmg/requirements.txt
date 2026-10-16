@@ -1,0 +1,8 @@
+# dmgbuild and its dependencies, pinned (pip install -r). Used by CI and the
+# release .dmg build; badge_icon needs the Quartz bindings.
+dmgbuild==1.6.7
+ds_store==1.3.3
+mac_alias==2.2.3
+pyobjc-core==12.2.2
+pyobjc-framework-Cocoa==12.2.2
+pyobjc-framework-Quartz==12.2.2

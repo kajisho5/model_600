@@ -1,6 +1,6 @@
 # MODEL 600 — 配布 dmg の窓とインストーラー（Step 1 設計 / Step 2 デザイン）
 
-状態：**承認待ち**。実装（Step 3）は案の選択と下記「確認事項」の回答の後に行う。
+状態：**案 1 で実装済み**（2026-10-16、「おまかせ」で案 1・runway 変更・dmg 名 `MODEL600-<バージョン>.dmg` に決定）。runway 側の変更は書き込みが拒否されたため `docs/RUNWAY_CHANGES.md` に未適用のまま残している。
 
 ## 1. 前提（事実）
 
@@ -27,7 +27,7 @@
 
 ## 3. 窓のデザイン（両案共通）
 
-- 窓の内容サイズは 660×400 pt。背景は 1x と 2x（Retina）の 2 枚を 1 つの TIFF にまとめる（`tiffutil -cathidpicheck`）。
+- 窓の内容サイズは 660×400 pt。背景画像は 660×420 pt にして、タイトルバーの高さの違いで下が白く空かないようにする（dmgbuild の既定では、640×240 の背景に 640×280 の窓を使っている）。背景は 1x と 2x（Retina）の 2 枚で、dmgbuild が 1 つの TIFF にまとめる（`tiffutil -cathidpicheck`）。
 - 上端の帯（64 pt、#0E1012）：MODEL 600 // BROADCAST SUITE と SEVENTHWELL（アンバー）。製品 GUI と同じ書体（Inter）・配色にする。
 - 中央の帯（#74777B）：項目名は Finder がシステムの文字色で描く。ライトモードでは黒、ダークモードでは白（推測：macOS の既定の挙動。実機では未確認）。この灰色は黒文字 4.67:1、白文字 4.50:1 で、どちらも 4.5:1 以上になる（`make_dmg.py` で計算）。アイコンと項目名はすべてこの帯の中に置く。
 - 下端の帯（#14171B）：動作環境。文字のコントラストは 8.6:1（日本語）と 5.6:1（英語）。
@@ -63,11 +63,14 @@
 ## 5. 変更するファイル（Step 3）
 
 **このリポ（model_600）**
-- `packaging/macos/installer/`：`main.swift`、`Info.plist`、`Localizable.strings`（ja / en）
-- `packaging/macos/dmg_settings.py`：dmgbuild の設定（中身・位置・背景・バッジ）
-- `packaging/macos/dmg_background.tiff`、`packaging/macos/installer.icns`：このフォルダの `make_dmg.py` から生成する
+- `packaging/macos/installer/`：`Installer.swift`、`Info.plist.in`、`{en,ja}.lproj/Localizable.strings`、`installer.icns`
+- `packaging/macos/dmg/settings.py`：dmgbuild の設定（中身・位置・背景・バッジ）。依存は `requirements.txt` でバージョンを固定
+- `packaging/macos/dmg/background.png`、`background@2x.png`、`installer.icns`：このフォルダの `export_assets.py` で生成する
 - `tools/ci/build_macos_release.sh`：インストーラーのビルドを追加し、`dist-mac/` に出力
-- `.github/workflows/build.yml`：`macos-release` ジョブで、インストーラーの構成と dmgbuild による仮の dmg 作成（署名なし）を確認する
+- `.github/workflows/build.yml`：`macos-release` ジョブで次を確認する。確認用の dmg は Artifacts（`MODEL600-dmg-layout-unsigned`）に出る
+  - インストーラーを画面なしの `--headless` で実行し、インストールと置き換えができること
+  - 改ざんしたプラグインはインストールされないこと
+  - dmgbuild で作った署名なしの dmg の中身（`.DS_Store`、背景、ボリュームアイコン、`.app` の拡張子が隠れていること、署名）
 - `release-mac.yml` と `CLAUDE.md`：`products` と `dmg_settings` を追記
 
 **runway（別リポ。書き込みにはあなたの許可が必要）**
@@ -86,4 +89,4 @@
 - Gatekeeper が dmg 内のインストーラーを別の場所に移して起動するか。署名済みの dmg では起きないという説があるが、Apple の一次情報は見つけられなかった。どちらの場合でも動くように作る。
 - `.plugin` に付けたアイコン（`CFBundleIconFile`）を Finder が表示するか。表示しない場合は、システムの「プラグイン」アイコンになる。
 
-再生成：`python3 make_dmg.py && ./render.sh`（このフォルダで実行。案 A の図柄は `../icon/make_icons.py` を使う）
+再生成：`python3 make_dmg.py && ./render.sh && python3 export_assets.py`（このフォルダで実行。案 A の図柄は `../icon/make_icons.py` を使う）
