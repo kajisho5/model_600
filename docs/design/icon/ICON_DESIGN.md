@@ -1,4 +1,16 @@
-# MODEL 600 — アイコン / DMG 設計（Step 1・改訂 2：Apple HIG 準拠）
+# MODEL 600 — アイコン / DMG 設計（改訂 2：Apple HIG 準拠）
+
+## 決定（2026-10-16）
+
+- 採用：**案 A「ダイヤル」**。Windows 用も作成する。DMG 窓（runway 側の変更）は未決のため今回は対象外。
+- 出荷物（`export_assets.py` で生成）：
+  - `resources/macos/model600.icns`：macOS 12〜15 はアイコンを自動でマスクしないため、Apple の macOS 格子（1024 中 824 px の角丸本体）で整形済み。影・光沢は描かない。`CFBundleIconFile` で `.plugin` に入る。
+  - `resources/windows/model600.ico`：16/20/24/32/40/48/64/256 px。`model600.rc.in` でアイコンとバージョン情報（会社名・製品名・バージョン・版）を `model600.dll` に埋め込む。
+  - `layers/icon_a_dial/`：macOS 26 の Icon Composer 用レイヤー（Mac で `.icon` を作る後続作業）。
+- 注意（推測・Windows 実機未確認）：Windows のエクスプローラーは `.dll` を種類共通のアイコンで表示するため、埋め込んだアイコンは一覧には出ない見込み。バージョン情報はプロパティ →「詳細」に出る。`.ico` は今後のインストーラーやサイトでも使う。
+
+再生成：`python3 make_icons.py && ./render.sh && python3 export_assets.py`（docs/design/icon で実行）
+
 
 一次情報：Apple Human Interface Guidelines「App icons」
 https://developer.apple.com/design/human-interface-guidelines/app-icons （2026-06-08 改訂版を 2026-10-16 に取得）

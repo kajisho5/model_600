@@ -148,6 +148,40 @@ def dmg_window():
     return doc(body, w, h, css)
 
 
+# ---------------------------------------------------------------------------
+# Shipping assets for the chosen concept (A). Pre-shaped versions for formats
+# whose OS does not mask the icon itself:
+#   macOS .icns  (macOS 12-15): Apple macOS grid, 824 px rounded body at 100 px.
+#   Windows .ico : same artwork, 48 px margin so 16-48 px sizes stay legible.
+# The square layers in layers/ remain the Icon Composer input (macOS 26).
+# ---------------------------------------------------------------------------
+CHOSEN = "icon_a_dial"
+
+
+def squircle(x, y, w, h, r):
+    k = 0.62 * r                    # Continuous-corner approximation.
+    return (f"M{x+r},{y} H{x+w-r} C{x+w-r+k},{y} {x+w},{y+r-k} {x+w},{y+r} "
+            f"V{y+h-r} C{x+w},{y+h-r+k} {x+w-r+k},{y+h} {x+w-r},{y+h} "
+            f"H{x+r} C{x+r-k},{y+h} {x},{y+h-r+k} {x},{y+h-r} "
+            f"V{y+r} C{x},{y+r-k} {x+r-k},{y} {x+r},{y} Z")
+
+
+def shaped(inner, margin):
+    body = S - 2 * margin
+    r = 0.2247 * body
+    scale = body / S
+    return doc(f'<defs><clipPath id="m"><path d="{squircle(margin, margin, body, body, r)}"/></clipPath></defs>'
+               f'<g clip-path="url(#m)"><g transform="translate({margin},{margin}) scale({scale:.5f})">{inner}</g></g>')
+
+
+def export_shaped():
+    inner = "".join(CONCEPTS[CHOSEN]("default").values())
+    with open(os.path.join(OUT, f"{CHOSEN}_macos_grid.svg"), "w") as f:
+        f.write(shaped(inner, 100))
+    with open(os.path.join(OUT, f"{CHOSEN}_windows.svg"), "w") as f:
+        f.write(shaped(inner, 48))
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     for f in os.listdir(OUT):
@@ -170,6 +204,8 @@ def main():
     with open(os.path.join(OUT, "dmg_window.svg"), "w") as f:
         f.write(dmg_window())
     print("wrote dmg_window")
+    export_shaped()
+    print("wrote shipping shapes for", CHOSEN)
 
 
 if __name__ == "__main__":

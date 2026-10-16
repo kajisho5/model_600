@@ -146,6 +146,8 @@ jobs:
             lipo -info "$bin" build/m600_test_dsp
             file "$bin" | grep -q "bundle" || { echo "not an MH_BUNDLE"; exit 1; }
             plutil -lint pkg/model600.plugin/Contents/Info.plist
+            [ "$(plutil -extract CFBundleIconFile raw pkg/model600.plugin/Contents/Info.plist)" = "model600" ]
+            test -f pkg/model600.plugin/Contents/Resources/model600.icns
             # No Accelerate "new LAPACK" imports (macOS 13.3+ only); minimum OS stays 12.0.
             if nm -um "$bin" | grep -q NEWLAPACK; then echo "NEWLAPACK symbols imported"; exit 1; fi
             otool -l "$bin" | grep -A3 LC_BUILD_VERSION | grep minos
@@ -164,6 +166,8 @@ jobs:
               && zip -q "../dist/$name.zip" install_mac.command THIRD_PARTY_NOTICES.md)
           else
             ls -l pkg/obs-plugins/64bit/model600.dll
+            # VERSIONINFO + icon resource from resources/windows/model600.rc.in.
+            pwsh -NoProfile -Command '$v = (Get-Item pkg/obs-plugins/64bit/model600.dll).VersionInfo; $v | Format-List ProductName,CompanyName,FileDescription,ProductVersion; if ($v.ProductName -ne "MODEL 600" -or $v.CompanyName -ne "SEVENTHWELL") { exit 1 }'
             cp THIRD_PARTY_NOTICES.md pkg/
             (cd pkg && 7z a -tzip "../dist/$name.zip" obs-plugins THIRD_PARTY_NOTICES.md >/dev/null)
           fi

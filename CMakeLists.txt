@@ -174,6 +174,19 @@ elseif(WIN32)
     list(APPEND MODEL600_SOURCES src/voice-command-win.cpp)
 endif()
 
+string(TIMESTAMP M600_YEAR "%Y")
+if(WIN32)
+    # Icon + VERSIONINFO (Properties > Details) for model600.dll.
+    if(MODEL600_PRO_EDITION)
+        set(M600_EDITION_NAME "Pro")
+    else()
+        set(M600_EDITION_NAME "Standard")
+    endif()
+    set(M600_ICO "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows/model600.ico")
+    configure_file(resources/windows/model600.rc.in "${CMAKE_CURRENT_BINARY_DIR}/model600.rc" @ONLY)
+    list(APPEND MODEL600_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/model600.rc")
+endif()
+
 add_library(model600 MODULE ${MODEL600_SOURCES} ${MODEL600_HEADERS})
 
 if(M600_PLUGIN_WHISPER)
@@ -220,7 +233,6 @@ endif()
 if(APPLE)
     # Loadable bundle, the layout OBS scans in ~/Library/Application Support/obs-studio/plugins:
     # model600.plugin/Contents/{Info.plist, MacOS/model600}.
-    string(TIMESTAMP M600_YEAR "%Y")
     set_target_properties(model600 PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION plugin
@@ -230,6 +242,10 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_COPYRIGHT "(c) ${M600_YEAR} SEVENTHWELL")
+    # Finder icon (docs/design/icon, concept A; macOS 12+ grid shape).
+    target_sources(model600 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources/macos/model600.icns")
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/resources/macos/model600.icns"
+                                PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     # Licence notices travel inside the signed bundle.
     target_sources(model600 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md")
     set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
