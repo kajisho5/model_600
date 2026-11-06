@@ -1,6 +1,26 @@
-# MODEL 600 // BROADCAST SUITE
+<p align="center"><img src="brand/app-icon.svg" width="128" alt="MODEL 600 app icon"></p>
 
-Broadcast-grade auto-mixing for OBS Studio, by **SEVENTHWELL**.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/model600-wordmark-white.svg">
+    <img src="brand/logo/model600-wordmark-black.svg" height="72" alt="SEVENTHWELL MODEL 600">
+  </picture>
+</p>
+
+<p align="center"><b>Broadcast-grade auto-mixing for OBS Studio</b><br>
+Five filters for your mic, calls, game audio, music and master that work as one mixer.</p>
+
+<p align="center">
+  <a href="#install"><b>Install</b></a> ·
+  <a href="docs/gui-samples/README.md">Screenshots</a> ·
+  <a href="#build">Build</a> ·
+  <a href="#known-limitations">Known limitations</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/kajisho5/model_600/actions/workflows/build.yml"><img alt="build" src="https://github.com/kajisho5/model_600/actions/workflows/build.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+</p>
 
 MODEL 600 is a set of five OBS audio filters that work as one mixer. Put each
 unit on the source it is made for: your mic, a call, game audio, music, and

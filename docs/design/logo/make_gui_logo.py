@@ -13,6 +13,7 @@
 #    python3 -m pip install fonttools   (any recent version)
 #
 #  Output (docs/design/logo/svg/): d_nameplate_*, e_segment_*, f_faceplate_*
+#  Chosen: D. Shipping files (transparent) go to brand/logo/ (export_brand).
 #    *_dark.svg   on the panel colour (as in the product)
 #    *_light.svg  on white (README light mode, documents)
 # =============================================================================
@@ -56,7 +57,7 @@ def text(s, x, y, size, weight="Bold", track=0.0, fill=T1):
     upm = f["head"].unitsPerEm
     sc = size / upm
     pen = SVGPathPen(gs)
-    cx = 0.0
+    cx = -f["hmtx"][cmap[ord(s[0])]][1] * sc    # Start the ink (not the side bearing) at x.
     for i, ch in enumerate(s):
         g = cmap[ord(ch)]
         tp = TransformPen(pen, (sc, 0, 0, -sc, x + cx, y))
@@ -117,42 +118,50 @@ def seven_seg(ch, x, y, h, on, off, skew=8.0):
 
 
 # --------------------------------------------------------------------------- concepts
-def d_nameplate(dark):
+def d_nameplate(dark, bg=True, subline=True, pad=60, dial_ink=None):
     """The GUI nameplate as the logo: amber SEVENTHWELL over MODEL 600, and the
-    amber badge (the unit-number tile in the product) carrying the dial."""
+    amber badge (the unit-number tile in the product) carrying the dial.
+    bg=False gives a transparent file; dial_ink sets the dial colour inside the
+    badge (default: the background colour, i.e. a knockout)."""
     fg = T1 if dark else INK
-    pad = 60
     s_brand, s_name = 22, 96
     brand, bw = text("SEVENTHWELL", 0, 0, s_brand, "SemiBold", track=260, fill=AMBER if dark else AMBER_ON_LIGHT)
     name, nw = text("MODEL 600", 0, 0, s_name, "Bold", track=-10, fill=fg)
     ch = cap_height(s_name)
     y_brand = pad + cap_height(s_brand, "SemiBold")
     y_name = y_brand + 22 + ch
-    # Badge: square tile, height = cap height, amber, with the dial knocked out.
     bx = pad + nw + 30
     by = y_name - ch
+    body = (f'<g transform="translate({pad},{y_brand:.2f})">{brand}</g>'
+            f'<g transform="translate({pad},{y_name:.2f})">{name}</g>')
+    body += badge(bx, by, ch, dial_ink or (FACE if dark else "#FFFFFF"))
+    h = y_name + pad
+    if subline:
+        y_rule = y_name + 30
+        sub, sw = text("BROADCAST SUITE", 0, 0, 20, "SemiBold", track=240, fill=fg)
+        body += f'<rect x="{pad}" y="{y_rule:.2f}" width="{nw * 0.55:.2f}" height="3" fill="{T3 if dark else "#B9BEC4"}"/>'
+        body += f'<g transform="translate({pad},{y_rule + 22 + cap_height(20, "SemiBold"):.2f})">{sub}</g>'
+        h = y_rule + 22 + cap_height(20, "SemiBold") + pad
+    w = bx + ch + pad
+    return doc(body, w, h, (FACE if dark else "#FFFFFF") if bg else None)
+
+
+def badge(bx, by, size, ink):
+    """Amber tile (the GUI unit badge) with the dial: 270-degree level arc,
+    disc, amber pointer."""
+    ch = size
     tile = f'<rect x="{bx:.2f}" y="{by:.2f}" width="{ch:.2f}" height="{ch:.2f}" rx="{ch * 0.12:.2f}" fill="{AMBER}"/>'
     c, r = (bx + ch / 2, by + ch / 2), ch * 0.30
-    knock = FACE if dark else "#FFFFFF"
     a0, a1 = math.radians(-135 - 90), math.radians(135 - 90)
     arc = (f'<path d="M{c[0] + r * math.cos(a0):.2f},{c[1] + r * math.sin(a0):.2f} '
            f'A{r:.2f},{r:.2f} 0 1 1 {c[0] + r * math.cos(a1):.2f},{c[1] + r * math.sin(a1):.2f}" '
-           f'fill="none" stroke="{knock}" stroke-width="{ch * 0.075:.2f}" stroke-linecap="round"/>')
-    disc = f'<circle cx="{c[0]:.2f}" cy="{c[1]:.2f}" r="{ch * 0.17:.2f}" fill="{knock}"/>'
+           f'fill="none" stroke="{ink}" stroke-width="{ch * 0.075:.2f}" stroke-linecap="round"/>')
+    disc = f'<circle cx="{c[0]:.2f}" cy="{c[1]:.2f}" r="{ch * 0.17:.2f}" fill="{ink}"/>'
     ang = math.radians(52 - 90)
     ptr = (f'<line x1="{c[0] + ch * 0.03 * math.cos(ang):.2f}" y1="{c[1] + ch * 0.03 * math.sin(ang):.2f}" '
            f'x2="{c[0] + ch * 0.11 * math.cos(ang):.2f}" y2="{c[1] + ch * 0.11 * math.sin(ang):.2f}" '
            f'stroke="{AMBER}" stroke-width="{ch * 0.05:.2f}" stroke-linecap="round"/>')
-    body = (f'<g transform="translate({pad},{y_brand:.2f})">{brand}</g>'
-            f'<g transform="translate({pad},{y_name:.2f})">{name}</g>' + tile + arc + disc + ptr)
-    # Rule + subline, as on the faceplate.
-    y_rule = y_name + 30
-    sub, sw = text("BROADCAST SUITE", 0, 0, 20, "SemiBold", track=240, fill=fg if dark else INK)
-    body += f'<rect x="{pad}" y="{y_rule:.2f}" width="{nw * 0.55:.2f}" height="3" fill="{T3 if dark else "#B9BEC4"}"/>'
-    body += f'<g transform="translate({pad},{y_rule + 22 + cap_height(20, "SemiBold"):.2f})">{sub}</g>'
-    w = bx + ch + pad
-    h = y_rule + 22 + cap_height(20, "SemiBold") + pad
-    return doc(body, w, h, FACE if dark else "#FFFFFF")
+    return tile + arc + disc + ptr
 
 
 def e_segment(dark):
@@ -218,8 +227,31 @@ def f_faceplate(dark):
 CONCEPTS = {"d_nameplate": d_nameplate, "e_segment": e_segment, "f_faceplate": f_faceplate}
 
 
+BRAND = os.path.normpath(os.path.join(HERE, "..", "..", "..", "brand"))
+
+
+def export_brand():
+    """Shipping logo files for the chosen concept (D), transparent background.
+    The dial inside the badge is dark ink in every version, so the badge reads
+    the same on any background."""
+    logo = os.path.join(BRAND, "logo")
+    os.makedirs(logo, exist_ok=True)
+    files = {
+        "model600-wordmark-white.svg": d_nameplate(True, bg=False, subline=False, pad=2, dial_ink=INK),
+        "model600-wordmark-black.svg": d_nameplate(False, bg=False, subline=False, pad=2, dial_ink=INK),
+        "model600-lockup-white.svg": d_nameplate(True, bg=False, subline=True, pad=2, dial_ink=INK),
+        "model600-lockup-black.svg": d_nameplate(False, bg=False, subline=True, pad=2, dial_ink=INK),
+        "model600-badge.svg": doc(badge(0, 0, 256, INK), 256, 256),
+    }
+    for name, svg in files.items():
+        with open(os.path.join(logo, name), "w") as f:
+            f.write(svg)
+        print("wrote brand/logo/" + name)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
+    export_brand()
     for name, fn in CONCEPTS.items():
         for mode, dark in (("dark", True), ("light", False)):
             with open(os.path.join(OUT, f"{name}_{mode}.svg"), "w") as f:
