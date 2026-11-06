@@ -1,7 +1,8 @@
-# runway に入れる変更（未適用）
+# runway に入れた変更（適用済み）
+
+**2026-10-30 に kajisho5/runway#2 で runway の main に入った。** 通し確認：runway の mac-release（run 41013540023）で model_600 の main をビルドし、`MODEL600-3373aea.dmg` を作成。dmgbuild（lzfse 圧縮）で窓のレイアウト付き、README 同梱、公証 Accepted、ステープル済み、`spctl` で「Notarized Developer ID」。以下は当時の設計メモ（実装は runway 側のコードが正）。
 
 対象：`kajisho5/runway`（private）。この変更が入ると、MODEL 600 の dmg に窓のレイアウト（背景・アイコンの位置・ボリュームアイコン）と README が入り、ファイル名も対象リポのコミット ID になる。
-このセッションでは runway への書き込みが拒否されたので、内容だけをここに残す。
 
 **状態**
 

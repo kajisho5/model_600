@@ -1,6 +1,6 @@
 # MODEL 600 — 配布 dmg の窓とインストーラー（Step 1 設計 / Step 2 デザイン）
 
-状態：**案 1 で実装済み**（2026-10-16、「おまかせ」で案 1・runway 変更・dmg 名 `MODEL600-<バージョン>.dmg` に決定）。runway 側の変更は書き込みが拒否されたため `docs/RUNWAY_CHANGES.md` に未適用のまま残している。
+状態：**案 1 で実装済み**（2026-10-16、「おまかせ」で案 1・runway 変更・dmg 名 `MODEL600-<バージョン>.dmg` に決定）。runway 側の変更は 2026-10-30 に kajisho5/runway#2 で適用済み。通し確認で `MODEL600-3373aea.dmg`（公証 Accepted）を作成。
 
 ## 1. 前提（事実）
 
