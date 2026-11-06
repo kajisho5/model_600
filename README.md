@@ -1,64 +1,140 @@
-# MODEL 600 // BROADCAST SUITE
+<p align="center"><img src="brand/app-icon.svg" width="128" alt="MODEL 600 app icon"></p>
 
-Commercial broadcast-grade auto-mixing suite for OBS Studio, by **SEVENTHWELL**.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/model600-wordmark-white.svg">
+    <img src="brand/logo/model600-wordmark-black.svg" height="72" alt="SEVENTHWELL MODEL 600">
+  </picture>
+</p>
 
-Five cooperating units communicate over an OS shared-memory bus so that
-voice-triggered mid-band ducking and a cooperative master ceiling run across
-separate OBS filters (and a future standalone companion app) with no routing.
+<p align="center"><b>Broadcast-grade auto-mixing for OBS Studio</b><br>
+Five filters for your mic, calls, game audio, music and master that work as one mixer.</p>
 
-| Unit | Filter name | Purpose |
-|------|-------------|---------|
-| 01 | VOCAL MASTER | Mic / voice: calibration, gate, de-plosive, whisper comp, de-esser, limiter |
-| 02 | COLLAB RIDER | Calls: auto-leveling + ducking under your voice |
-| 03 | GAME IMPACT | Game audio: transient taming + voice scoop |
-| 04 | BGM POCKET | Music: M/S spectral pocket + AFK auto-swell |
-| 05 | STREAM DIRECTOR | (Pro) Master telemetry, BS.1770-4 loudness, scene macros |
+<p align="center">
+  <a href="#install"><b>Install</b></a> ·
+  <a href="docs/gui-samples/README.md">Screenshots</a> ·
+  <a href="#build">Build</a> ·
+  <a href="#known-limitations">Known limitations</a>
+</p>
 
-## Architecture (3-layer, OBS confined to ~5%)
+<p align="center">
+  <a href="https://github.com/kajisho5/model_600/actions/workflows/build.yml"><img alt="build" src="https://github.com/kajisho5/model_600/actions/workflows/build.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+</p>
 
-- **Layer 1 (portable, pure C++20)** — `shared-state.hpp`, `dsp-core.hpp`,
+MODEL 600 is a set of five OBS audio filters that work as one mixer. Put each
+unit on the source it is made for: your mic, a call, game audio, music, and
+the master. The units share one bus in OS shared memory. When you speak, music
+and game audio move out of the way of your voice, and the master keeps the
+whole mix under one ceiling. You set up no routing.
+
+![The [01] VOCAL MASTER console](docs/gui-samples/02_console_unit01_en.png)
+
+## The five units
+
+| Unit | Filter name | Put it on | What it does |
+|------|-------------|-----------|--------------|
+| 01 | VOCAL MASTER | Your mic | Input calibration, gate, de-plosive, whisper compressor, de-esser, limiter |
+| 02 | COLLAB RIDER | Calls (Discord and similar) | Keeps call levels even and ducks them while you talk |
+| 03 | GAME IMPACT | Game audio | Tames sudden peaks and leaves room in the mid band for your voice |
+| 04 | BGM POCKET | Music | Mid/side spectral pocket for your voice; brings music back up while you are away |
+| 05 | STREAM DIRECTOR | Master (Pro) | Master meters and BS.1770-4 loudness, scene macros, voice commands |
+
+## Install
+
+### macOS (12 or later, Apple silicon and Intel)
+
+The macOS build ships as a `.dmg` signed with a Developer ID and notarized by Apple.
+
+1. Open the `.dmg` and double-click **MODEL 600 Installer**. The first time,
+   macOS asks whether to open an app downloaded from the internet. Choose
+   **Open**.
+2. Click **Install**. If OBS Studio is open, quit it and click **Try Again**.
+   The installer copies `model600.plugin` into
+   `~/Library/Application Support/obs-studio/plugins`. That is the folder OBS
+   loads third-party plug-ins from on macOS.
+3. Start OBS Studio, open an audio source's **Filters**, and add
+   **MODEL 600 - [01] VOCAL MASTER** (and the other units as needed).
+
+The installer installs only a plug-in signed by the same developer as the
+installer. To install by hand, copy `model600.plugin` into the folder above.
+The `README.txt` in the disk image has both sets of steps.
+
+### Windows (64-bit)
+
+Extract `model600-Windows-<edition>.zip` into the OBS Studio install folder
+(for example `C:\Program Files\obs-studio`). It contains
+`obs-plugins/64bit/model600.dll`. The Windows build is not code-signed yet.
+
+### Requirements
+
+- OBS Studio 31 or later for the packaged macOS and Windows builds. They are
+  built against the OBS 31.1.1 SDK.
+- macOS 12 or later (Universal 2), or 64-bit Windows.
+
+## Voice director (Pro)
+
+STREAM DIRECTOR understands spoken commands in Japanese, English, Korean,
+Chinese and Indonesian. A command fires only after a wake word such as
+"Director" or "音響さん". Every command can be undone.
+
+| OS | Speech engine | Notes |
+|----|---------------|-------|
+| Windows | SAPI (built into Windows) | |
+| macOS | whisper.cpp, built into the plug-in (`ggml-base-q5_1.bin`, about 60 MB, inside the bundle) | No permission prompt; runs entirely on the Mac |
+| Linux | None by default (enable the built-in engine with `-DMODEL600_VOICE_WHISPER=ON`) | |
+
+On macOS the plug-in cannot use the system speech recognizer (see
+[Known limitations](#known-limitations)), so it carries its own. It never opens
+the microphone. It listens only to the signal of UNIT 01 before effects. The
+pipeline is: utterance detection → resample to 16 kHz → whisper → the shared
+multilingual command parser. None of this runs on the OBS audio thread.
+
+- whisper.cpp v1.9.4 is pinned to a commit, and the model is checked against
+  its SHA-256 (`cmake/whisper.cmake`).
+- Universal 2 builds compile arm64 and x86_64 separately and then merge them.
+  x86_64 is limited to AVX + F16C, so 2013 Intel Macs can run it.
+- The regression test `m600_test_whisper` (`-DMODEL600_WHISPER_TESTS=ON`) runs
+  synthesized Japanese and English commands. It requires zero false triggers
+  and at least 70 % recognized (`tests/data/voice/`).
+
+## Interface
+
+The GUI v2 "hardware" design draws each unit as a rack panel, with 7-segment
+displays, LED bars and real-time meters. Every screen is in
+[`docs/gui-samples/`](docs/gui-samples/README.md). The images are rendered by
+the shipping Qt code, with meter values from audio run through each unit's DSP
+engine.
+
+- Design specification: [`docs/design/v2/DESIGN_V2.md`](docs/design/v2/DESIGN_V2.md)
+- Panels and parts are rendered in Blender
+  ([`docs/design/v2/render_hardware.py`](docs/design/v2/render_hardware.py)).
+  [`pack_assets.py`](docs/design/v2/pack_assets.py) packs them into `resources/hw/`.
+
+## Architecture
+
+The code is split into three layers. OBS-specific code is about 5 % of it.
+
+- **Layer 1, portable C++20**: `shared-state.hpp`, `dsp-core.hpp`,
   `voice-command-multilingual.hpp`, `voice-segmenter.hpp`
-- **Layer 2 (portable + Qt / whisper.cpp)** — `license-manager.hpp`, `update-checker.hpp`,
-  `os-conflict-shield.hpp`, `custom-ui-dialog.{hpp,cpp}`, `voice-whisper.{hpp,cpp}`
-- **Layer 3 (OBS adapters)** — `audio-filter.cpp`, `plugin-main.cpp`,
+- **Layer 2, portable with Qt / whisper.cpp**: `license-manager.hpp`,
+  `update-checker.hpp`, `os-conflict-shield.hpp`, `custom-ui-dialog.{hpp,cpp}`,
+  `voice-whisper.{hpp,cpp}`
+- **Layer 3, OBS adapters**: `audio-filter.cpp`, `plugin-main.cpp`,
   `voice-command-win.cpp`
 
-## 音声ディレクターのエンジン / Voice director engine
-
-| OS | 認識エンジン | 備考 |
-|----|------------|------|
-| Windows | SAPI（OS 標準） | |
-| macOS | 内蔵 whisper.cpp（`ggml-base-q5_1.bin`, 約 60 MB をバンドル同梱） | 許可ダイアログなし・完全オンデバイス |
-| Linux | なし（`-DMODEL600_VOICE_WHISPER=ON` で内蔵エンジンを有効化可） | |
-
-macOS は OS 標準の音声認識を使えないため（下の「既知の制限」参照）、音声認識を
-プラグインに内蔵しています。マイクは開かず、UNIT 01 のエフェクト前の音声だけを
-認識します。発話区間検出 → 16 kHz 変換 → whisper → 既存の多言語コマンド解析、の
-順に処理し、OBS の音声スレッドは一切止めません。
-
-- whisper.cpp v1.9.4 はコミット ID 固定、モデルは SHA-256 検証（`cmake/whisper.cmake`）。
-- Universal2 では arm64 / x86_64 を別々にビルドして結合します（x86_64 は AVX+F16C までに制限し、2013 年の Intel Mac でも動作）。
-- 回帰テスト `m600_test_whisper`（`-DMODEL600_WHISPER_TESTS=ON`）：合成音声の日本語・英語コマンドで、誤発火 0 件と認識率 70% 以上を確認します（`tests/data/voice/`）。
-
-The Layer 1/2 code carries no OBS dependency, so it recompiles unchanged for the
-planned Discord VC edition, a VST3 plugin and an iOS companion.
-
-## GUI
-
-全画面のサンプル画像は [`docs/gui-samples/`](docs/gui-samples/README.md) にあります。実装コードを直接描画したものです。
-
-- **デザイン仕様**：GUI v2「実機ハードウェア」の仕様は [`docs/design/v2/DESIGN_V2.md`](docs/design/v2/DESIGN_V2.md) にあります。
-- **パネルと部品**：[`docs/design/v2/render_hardware.py`](docs/design/v2/render_hardware.py)（Blender）で書き出し、[`pack_assets.py`](docs/design/v2/pack_assets.py) で `resources/hw/` にまとめています。
+Layers 1 and 2 do not depend on OBS. They are meant to recompile unchanged for
+the planned Discord VC edition, a VST3 plug-in and an iOS companion app.
 
 ## Build
 
 ```bash
-python3 setup_project.py --tests      # configure + build + run self-tests
-python3 setup_project.py --install    # build then install into OBS
-python3 setup_project.py --standard   # Standard edition (no UNIT 05 / voice)
+python3 setup_project.py --tests      # configure, build and run the self-tests
+python3 setup_project.py --install    # build, then install into OBS
+python3 setup_project.py --standard   # Standard edition (no UNIT 05, no voice director)
 ```
 
-Direct CMake:
+With CMake directly:
 
 ```bash
 cmake -S . -B build -DMODEL600_PRO_EDITION=ON -DMODEL600_BUILD_TESTS=ON
@@ -67,38 +143,64 @@ ctest --test-dir build --output-on-failure
 ```
 
 - **Windows**: `build_win.ps1 -QtDir <...> -ObsDir <...> [-Install] [-RunTests]`
-- **macOS**: build, then double-click `install_mac.command` (clears Gatekeeper
-  quarantine and installs the `.plugin`).
+- **macOS (development)**: build, then double-click `install_mac.command`. It
+  clears the Gatekeeper quarantine flag and installs the `.plugin`.
+- **macOS (release)**: `bash tools/ci/build_macos_release.sh` builds
+  `dist-mac/model600.plugin` and `dist-mac/MODEL 600 Installer.app`. Signing,
+  notarization and the `.dmg` happen in a separate private pipeline
+  (`kajisho5/runway`). This repository holds no signing keys. The disk image
+  layout is `packaging/macos/dmg/settings.py`, and its install guide is
+  `packaging/macos/README.txt`.
 
-Mac 配布用（Developer ID 署名＋公証済み .dmg）は `kajisho5/runway` の mac-notarize で作ります
-（手順は `CLAUDE.md`）。ビルドは `bash tools/ci/build_macos_release.sh` → 成果物は
-`dist-mac/model600.plugin`、.dmg 同梱の説明は `packaging/macos/README.txt`。
+Build requirements: Qt 6, CMake 3.21+, and a C++20 compiler (MSVC with
+`/utf-8 /W4`, Apple Clang for Universal 2, or GCC/Clang on Linux). The OBS
+SDK comes from your OBS installation, or from `tools/ci/obs_sdk.cmake`
+(OBS 31.1.1).
 
-CI packages (GitHub Actions artifacts `model600-<OS>-<edition>`):
+### Continuous integration
 
-- `model600-Windows-*.zip`: `obs-plugins/64bit/model600.dll` — extract into the
-  OBS install folder (e.g. `C:\Program Files\obs-studio`).
-- `model600-macOS-*.zip`: `model600.plugin` (Universal2, ad-hoc signed) +
-  `install_mac.command` — extract and double-click the installer.
+Every push builds and tests on Linux, Windows and macOS (Pro and Standard),
+plus the macOS release build with Xcode 26. The workflow is
+`.github/workflows/build.yml`. Its artifacts:
 
-### Requirements
-OBS Studio 30+, Qt 6, a C++20 compiler (MSVC `/utf-8 /W4`, Apple Clang
-Universal2, or GCC/Clang on Linux), CMake 3.21+.
-
-Third-party components and their licences: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+- `model600-Windows-<edition>.zip`: `obs-plugins/64bit/model600.dll`
+- `model600-macOS-<edition>.zip`: `model600.plugin` (Universal 2, ad-hoc
+  signed) and `install_mac.command`
+- `MODEL600-dmg-layout-unsigned`: an unsigned preview of the release disk image
 
 ## Editions
-`-DMODEL600_PRO_EDITION=ON|OFF` physically includes or excludes the Pro code
-(UNIT 05 and the voice director) at compile time. Online activation is handled
-by the Cloudflare Worker in `tools/cloudflare_worker_auth.js`; the vendor mints
-keys with `tools/generate_keys.py`. The offline signed token is byte-for-byte
-identical between the Worker and `license-manager.hpp`, so activation survives a
+
+`-DMODEL600_PRO_EDITION=ON|OFF` decides at compile time whether the Pro code
+(UNIT 05 and the voice director) is in the binary at all. Online activation is
+handled by the Cloudflare Worker in `tools/cloudflare_worker_auth.js`, and keys
+are minted with `tools/generate_keys.py`. The Worker and `license-manager.hpp`
+produce byte-for-byte identical offline tokens, so activation survives a
 network outage.
 
-## 既知の制限 / Known limitations
+## Known limitations
 
-- 音声コマンド受理時の完了チャイム（モニター専用、-24 dB）は未実装です。OBSフィルタの出力は配信にも乗るため、モニターだけに鳴らすには別のモニター専用ソースが必要になります。
-- macOS で OS 標準の音声認識（Speech framework）を使わない理由：許可ダイアログの文言（`NSSpeechRecognitionUsageDescription`）はホストアプリ（OBS.app）の Info.plist から読まれますが、OBS 31.1.1 はこのキーを持っておらず、キーが無いアプリで音声認識を要求すると macOS がプロセスを終了させます。そのため内蔵の whisper.cpp を使います。
-- 内蔵エンジンの認識精度は、自動テストでは合成音声（Open JTalk / eSpeak NG）でしか確認していません。実際の声での精度、韓国語・中国語・インドネシア語の精度、Intel Mac での応答時間は未確認です。
-- whisper.cpp の取得とモデルのダウンロードはビルド時に行います（ネットワークが無い環境では `-DMODEL600_WHISPER_MODEL_PATH=<ggml-base-q5_1.bin>` を指定）。
-- ライセンス・保護・OS設定修復まわりの保留事項は [`docs/DEFERRED_NOTES.md`](docs/DEFERRED_NOTES.md) にまとめています。
+- **No completion chime yet.** The chime that confirms a voice command was
+  meant for the monitor only, at -24 dB. A filter's output also goes to the
+  stream, so playing it on the monitor alone needs a separate monitor-only
+  source.
+- **No system speech recognizer on macOS.** macOS reads the permission text
+  (`NSSpeechRecognitionUsageDescription`) from the host app's Info.plist, here
+  OBS.app. OBS 31.1.1 does not have that key, and macOS terminates an app that
+  requests speech recognition without it. That is why the built-in whisper.cpp
+  engine is used instead.
+- **Accuracy so far comes from synthesized voices only.** Automated tests use
+  Open JTalk and eSpeak NG. Accuracy with real voices, accuracy in Korean,
+  Chinese and Indonesian, and response time on Intel Macs have not been
+  measured.
+- **Not yet run in OBS on a real Mac or Windows PC.** CI confirms that the
+  plug-in loads into the real libobs on Linux, and it checks the macOS
+  installer and disk image.
+- **The build downloads whisper.cpp and the model.** Offline, pass
+  `-DMODEL600_WHISPER_MODEL_PATH=<path to ggml-base-q5_1.bin>`.
+- Open items on licensing, protection and OS setting repair are tracked in
+  [`docs/DEFERRED_NOTES.md`](docs/DEFERRED_NOTES.md).
+
+## License
+
+MIT. See [`LICENSE`](LICENSE). Third-party components and their licences are
+listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
