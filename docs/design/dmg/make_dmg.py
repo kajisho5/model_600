@@ -34,6 +34,8 @@ HEAD = "#0E1012"
 BAND = "#74777B"
 FOOT = "#14171B"
 AMBER = mi.AMBER
+INK = "#14171B"
+WORDMARK = os.path.normpath(os.path.join(HERE, "..", "..", "..", "brand", "logo", "model600-wordmark-white.svg"))
 FOOT_TXT, FOOT_TXT2 = "#AEB4BB", "#8A9199"
 
 LATIN = "Inter"
@@ -66,13 +68,22 @@ def contrast(a, b):
 
 # --------------------------------------------------------------------------- icons
 def concept_a_installer():
-    """Installer variant of concept A: same dial on the aluminium (light) ground,
-    so it reads as 'MODEL 600' but is not mistaken for the plug-in itself."""
-    a = mi.concept_a("default")
-    bg = mi.grad_bg("#EEF0F2", "#C7CCD2")
-    track = a["fg1_track"].replace('stroke="#FFFFFF" stroke-opacity="0.16"', 'stroke="#14171B" stroke-opacity="0.14"')
-    disc = a["fg3_disc"].replace(f'fill="{mi.ALU}"', 'fill="#2B3038"')
-    return bg + track + a["fg2_level"] + disc + a["fg4_pointer"]
+    """Installer icon = the logo badge: amber ground, ink dial (270-degree arc and
+    disc) and an amber pointer, so it reads as MODEL 600 but is not mistaken for
+    the plug-in (graphite icon). Full-bleed 1024 layers, no drawn effects."""
+    S = mi.S
+    cx, cy = 512, 520
+    bg = mi.grad_bg("#F6B24E", "#E08F24")
+    arc = (f'<path d="{mi.arc_path(cx, cy, 318, -135, 135)}" fill="none" stroke="{INK}" '
+           f'stroke-width="76" stroke-linecap="round"/>')
+    disc = f'<circle cx="{cx}" cy="{cy}" r="196" fill="{INK}"/>'
+    t = math.radians(52 - 90)
+    px, py = cx + 118 * math.cos(t), cy + 118 * math.sin(t)
+    qx, qy = cx + 36 * math.cos(t), cy + 36 * math.sin(t)
+    ptr = (f'<line x1="{qx:.1f}" y1="{qy:.1f}" x2="{px:.1f}" y2="{py:.1f}" stroke="{AMBER}" '
+           f'stroke-width="60" stroke-linecap="round"/>')
+    del S
+    return bg + arc + disc + ptr
 
 
 def shaped_inner(inner, uid, margin=100):
@@ -121,13 +132,22 @@ def css():
             f"</style>")
 
 
+def wordmark(x, y, h):
+    """The brand logo (brand/logo/model600-wordmark-white.svg), placed at height h."""
+    import re
+    src = open(WORDMARK, encoding="utf-8").read()
+    vb = re.search(r'viewBox="([^"]+)"', src).group(1)
+    inner = src[src.index(">", src.index("<svg")) + 1:src.rindex("</svg>")]
+    vw, vh = (float(v) for v in vb.split()[2:])
+    return f'<svg x="{x}" y="{y}" width="{h * vw / vh:.2f}" height="{h}" viewBox="{vb}">{inner}</svg>'
+
+
 def frame():
     return (f'<rect width="{W}" height="{H}" fill="{FOOT}"/>'
             f'<rect width="{W}" height="{HEAD_H}" fill="{HEAD}"/>'
             f'<rect y="{HEAD_H}" width="{W}" height="{BAND_B - HEAD_H}" fill="{BAND}"/>'
-            + t(32, 41, "MODEL 600", 20, "#E7E9EC", 700, ls=3)
-            + t(196, 41, "// BROADCAST SUITE", 14, "#8A9199", 500, ls=2)
-            + t(W - 32, 41, "SEVENTHWELL", 12, AMBER, 600, "end", ls=3)
+            + wordmark(32, 12, 40)
+            + t(W - 32, 51, "BROADCAST SUITE", 11, "#8A9199", 600, "end", ls=2.6)
             + t(W / 2, 368, "macOS 12 以降（Apple シリコン / Intel）・ OBS Studio 31 以降", 11.5, FOOT_TXT, 500, "middle")
             + t(W / 2, 385, "macOS 12 or later (Apple silicon / Intel) · OBS Studio 31 or later", 11, FOOT_TXT2, 400, "middle"))
 
